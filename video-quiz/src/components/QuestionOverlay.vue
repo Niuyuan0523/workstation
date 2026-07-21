@@ -32,11 +32,7 @@ function stateClass(r: AnswerRegion) {
   const isSelected = props.selectedRegionId === r.id
   return {
     'region--hint': props.showHints,
-    'region--selected-correct': props.feedback === 'correct' && isSelected,
     'region--selected-wrong': props.feedback === 'wrong' && isSelected,
-    // 答错后，把正确项标绿，帮助学习
-    'region--reveal-correct':
-      props.feedback === 'wrong' && r.correct && !isSelected,
   }
 }
 </script>
@@ -55,11 +51,6 @@ function stateClass(r: AnswerRegion) {
       <span v-if="showHints" class="region__label">{{ r.label || r.id }}</span>
     </button>
 
-    <transition name="pop">
-      <div v-if="feedback === 'correct'" class="toast toast--correct">
-        <span class="toast__icon">✓</span> 回答正确
-      </div>
-    </transition>
     <transition name="pop">
       <div v-if="feedback === 'wrong'" class="toast toast--wrong">
         <span class="toast__icon">✕</span> 答错了，再想想～
@@ -116,20 +107,11 @@ function stateClass(r: AnswerRegion) {
 }
 
 /* 反馈态 */
-.region--selected-correct {
-  border-color: var(--brand);
-  background: rgba(34, 197, 94, 0.22);
-  box-shadow: 0 0 0 4px rgba(34, 197, 94, 0.25);
-}
 .region--selected-wrong {
   border-color: var(--danger);
   background: rgba(239, 68, 68, 0.22);
   box-shadow: 0 0 0 4px rgba(239, 68, 68, 0.2);
   animation: shake 0.35s ease;
-}
-.region--reveal-correct {
-  border-color: var(--brand);
-  background: rgba(34, 197, 94, 0.14);
 }
 
 @keyframes shake {
@@ -161,9 +143,6 @@ function stateClass(r: AnswerRegion) {
   gap: 8px;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
   z-index: 6;
-}
-.toast--correct {
-  background: var(--brand);
 }
 .toast--wrong {
   background: var(--danger);

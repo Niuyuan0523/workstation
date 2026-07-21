@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import { useVideoQuiz } from '../composables/useVideoQuiz'
-import type { Course } from '../types/quiz'
+import type { Course, AnswerRegion } from '../types/quiz'
 import QuestionOverlay from './QuestionOverlay.vue'
+import { playWrongSound } from '../utils/sound'
 
 const props = defineProps<{
   course: Course
@@ -32,6 +33,12 @@ const {
 
 /** 是否移动端（用于进入即全屏横屏、避免原生接管） */
 const isMobile = /Android|iPhone|iPad|iPod|Mobile|Windows Phone/i.test(navigator.userAgent)
+
+/** 作答：答错时播放提示音效（点击热区属于用户手势，音频可正常播放） */
+function onAnswer(region: AnswerRegion) {
+  const result = answer(region)
+  if (result && !result.correct) playWrongSound()
+}
 
 /** 是否已开始（首帧点击播放，规避浏览器自动播放限制） */
 const started = ref(false)
@@ -208,7 +215,7 @@ function fmt(sec: number) {
         :question="activeQuestion"
         :feedback="feedback"
         :selected-region-id="selectedRegionId"
-        @answer="answer"
+        @answer="onAnswer"
       />
 
       <!-- 暂停中的手动播放提示（非答题、非结束时） -->

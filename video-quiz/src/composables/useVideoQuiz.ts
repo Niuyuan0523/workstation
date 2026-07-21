@@ -123,14 +123,12 @@ export function useVideoQuiz(course: Course, videoRef: Ref<HTMLVideoElement | nu
     if (resumeTimer) window.clearTimeout(resumeTimer)
 
     if (correct) {
-      feedback.value = 'correct'
+      // 答对：不做任何提示，直接清除题目并续播
       markAnswered(q.id)
-      resumeTimer = window.setTimeout(() => {
-        activeQuestion.value = null
-        selectedRegionId.value = null
-        play()
-      }, 650)
-      scheduleFeedbackClear(900)
+      activeQuestion.value = null
+      selectedRegionId.value = null
+      feedback.value = null
+      play()
     } else {
       feedback.value = 'wrong'
       if (q.resumeMode === 'always') {
