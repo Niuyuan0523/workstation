@@ -1,0 +1,76 @@
+{
+  "id": "physics-newton",
+  "title": "牛顿运动定律（示例·待替换视频与试题）",
+  "category": "物理",
+  "videoSrc": "/videos/insect.mp4",
+  "questions": [
+    {
+      "id": "q1",
+      "type": "choice",
+      "pauseTime": 389,
+      "title": "",
+      "resumeMode": "onCorrect",
+      "regions": [
+        {
+          "id": "opt1",
+          "label": "",
+          "x": 15.7,
+          "y": 27.4,
+          "width": 20.9,
+          "height": 45.3,
+          "correct": true
+        },
+        {
+          "id": "opt2",
+          "label": "",
+          "x": 41.5,
+          "y": 28.4,
+          "width": 20.5,
+          "height": 43.8
+        },
+        {
+          "id": "opt3",
+          "label": "",
+          "x": 67.5,
+          "y": 29.2,
+          "width": 20,
+          "height": 43
+        }
+      ]
+    },
+    {
+      "id": "q2",
+      "type": "choice",
+      "pauseTime": 10,
+      "title": "",
+      "resumeMode": "onCorrect",
+      "regions": [
+        {
+          "id": "opt1",
+          "label": "",
+          "x": 20.4,
+          "y": 33.5,
+          "width": 13.8,
+          "height": 28.9
+        },
+        {
+          "id": "opt2",
+          "label": "",
+          "x": 45.4,
+          "y": 35.7,
+          "width": 14.6,
+          "height": 22.7,
+          "correct": true
+        },
+        {
+          "id": "opt3",
+          "label": "",
+          "x": 73.6,
+          "y": 40,
+          "width": 15.1,
+          "height": 24.4
+        }
+      ]
+    }
+  ]
+}

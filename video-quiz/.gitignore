@@ -1,0 +1,10 @@
+node_modules
+dist
+dist-ssr
+*.local
+.DS_Store
+.vscode/*
+!.vscode/extensions.json
+
+# 大体积视频资源默认忽略（本地放入 public/videos/ 即可）
+public/videos/*.mp4

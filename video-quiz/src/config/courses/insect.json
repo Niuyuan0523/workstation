@@ -1,0 +1,20 @@
+{
+  "id": "insect",
+  "title": "什么是昆虫",
+  "category": "昆虫",
+  "videoSrc": "/videos/insect.mp4",
+  "questions": [
+    {
+      "id": "q1",
+      "type": "choice",
+      "pauseTime": 8,
+      "title": "世界上已知的昆虫大约有多少种？",
+      "resumeMode": "onCorrect",
+      "regions": [
+        { "id": "a", "label": "100万", "x": 14, "y": 73, "width": 21, "height": 20, "correct": true },
+        { "id": "b", "label": "75万", "x": 40, "y": 73, "width": 21, "height": 20 },
+        { "id": "c", "label": "50万", "x": 66, "y": 73, "width": 21, "height": 20 }
+      ]
+    }
+  ]
+}
