@@ -1,0 +1,570 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>智能相册整理助手 - 按拍摄时间分类</title>
+    <!-- Tailwind CSS (local) -->
+    <script src="./vendor/tailwind.min.js"></script>
+    <!-- Font Awesome (local) -->
+    <link rel="stylesheet" href="./vendor/fontawesome/css/all.min.css">
+    <!-- EXIF Reader Library (local) -->
+    <script src="./vendor/exif.min.js"></script>
+    <!-- JSZip (local) -->
+    <script src="./vendor/jszip.min.js"></script>
+    
+    <style>
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #f1f1f1; 
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #cbd5e1; 
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #94a3b8; 
+        }
+
+        /* Animations */
+        .fade-in {
+            animation: fadeIn 0.5s ease-in-out;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .drop-zone-active {
+            border-color: #3b82f6;
+            background-color: #eff6ff;
+            transform: scale(1.02);
+        }
+
+        .photo-card {
+            transition: all 0.3s ease;
+        }
+        .photo-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1);
+        }
+        
+        /* Loader */
+        .loader {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #3b82f6;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        /* Collapsible group */
+        .group-body {
+            overflow: hidden;
+            transition: max-height 0.4s ease, opacity 0.3s ease;
+        }
+        .group-collapsed .group-body {
+            max-height: 0 !important;
+            opacity: 0;
+        }
+        .group-collapsed .chevron {
+            transform: rotate(-90deg);
+        }
+        .chevron {
+            transition: transform 0.3s ease;
+        }
+    </style>
+</head>
+<body class="bg-slate-50 text-slate-800 font-sans min-h-screen flex flex-col">
+
+    <!-- Header -->
+    <header class="bg-white shadow-sm sticky top-0 z-50">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+            <div class="flex items-center gap-3">
+                <div class="bg-blue-600 text-white p-2 rounded-lg">
+                    <i class="fa-solid fa-images text-xl"></i>
+                </div>
+                <h1 class="text-xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-600 to-indigo-600">
+                    SmartAlbum Sorter
+                </h1>
+            </div>
+            <div class="flex items-center gap-4">
+                <button id="resetBtn" class="hidden text-sm text-slate-500 hover:text-red-500 transition-colors">
+                    <i class="fa-solid fa-trash-can mr-1"></i> 清空重置
+                </button>
+                <a href="#" class="text-slate-400 hover:text-blue-600 transition-colors">
+                    <i class="fa-solid fa-circle-question"></i>
+                </a>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="flex-grow max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 w-full">
+        
+        <!-- Upload Section -->
+        <section id="uploadSection" class="mb-10 fade-in">
+            <div class="bg-white rounded-2xl shadow-lg p-8 text-center border-2 border-dashed border-slate-300 transition-all duration-300" id="dropZone">
+                <div class="mb-4">
+                    <i class="fa-solid fa-cloud-arrow-up text-6xl text-blue-200"></i>
+                </div>
+                <h2 class="text-2xl font-semibold text-slate-700 mb-2">拖拽照片到此处</h2>
+                <p class="text-slate-500 mb-6">支持 JPG, PNG, WEBP 格式。我们将读取 EXIF 信息按拍摄日期自动分组。</p>
+                
+                <label class="inline-flex items-center px-6 py-3 border border-transparent text-base font-medium rounded-full shadow-sm text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 cursor-pointer transition-all hover:shadow-lg">
+                    <i class="fa-solid fa-folder-open mr-2"></i>
+                    选择文件
+                    <input type="file" id="fileInput" multiple accept="image/*" class="hidden">
+                </label>
+                
+                <div class="mt-4 text-xs text-slate-400">
+                    <i class="fa-solid fa-shield-halved mr-1"></i> 所有处理均在本地浏览器完成，不会上传至服务器
+                </div>
+            </div>
+        </section>
+
+        <!-- Processing Status -->
+        <section id="processingStatus" class="hidden mb-8 text-center">
+            <div class="inline-flex items-center justify-center p-4 bg-white rounded-xl shadow-md">
+                <div class="loader mr-4"></div>
+                <div class="text-left">
+                    <p class="font-medium text-slate-700">正在分析照片元数据...</p>
+                    <p class="text-sm text-slate-500" id="progressText">0 / 0 已完成</p>
+                </div>
+            </div>
+        </section>
+
+        <!-- Controls & Filters -->
+        <section id="controlsSection" class="hidden mb-6 flex flex-col sm:flex-row justify-between items-center gap-4 fade-in">
+            <div class="flex flex-wrap items-center gap-3">
+                <div class="flex items-center gap-2 bg-white p-2 rounded-lg shadow-sm border border-slate-200">
+                    <span class="text-sm font-medium text-slate-600 px-2 whitespace-nowrap"><i class="fa-solid fa-sort mr-1"></i> 排序方式:</span>
+                    <select id="sortOrder" class="bg-slate-50 border-none text-sm rounded-md focus:ring-blue-500 focus:border-blue-500 block w-full p-2">
+                        <option value="desc">最新拍摄在前 (倒序)</option>
+                        <option value="asc">最早拍摄在前 (正序)</option>
+                    </select>
+                </div>
+                <div class="flex items-center gap-2 bg-white p-2 rounded-lg shadow-sm border border-slate-200">
+                    <span class="text-sm font-medium text-slate-600 px-2"><i class="fa-regular fa-calendar mr-1"></i> 按月下载:</span>
+                    <select id="monthSelect" class="bg-slate-50 border-none text-sm rounded-md focus:ring-blue-500 focus:border-blue-500 block p-2"></select>
+                    <button id="downloadMonthBtn" class="inline-flex items-center px-3 py-2 text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors">
+                        <i class="fa-solid fa-download mr-1"></i> 下载
+                    </button>
+                </div>
+            </div>
+            
+            <div class="flex items-center gap-2">
+                <span class="text-sm text-slate-500" id="totalCount">共 0 张照片</span>
+                <span class="text-slate-300">|</span>
+                <span class="text-sm text-slate-500" id="groupCount">分为 0 组</span>
+            </div>
+        </section>
+
+        <!-- Results Grid -->
+        <section id="resultsSection" class="hidden space-y-8">
+            <!-- Dynamic Content Will Be Injected Here -->
+        </section>
+
+    </main>
+
+    <!-- Footer -->
+    <footer class="bg-white border-t border-slate-200 mt-auto">
+        <div class="max-w-7xl mx-auto py-6 px-4 sm:px-6 lg:px-8">
+            <p class="text-center text-sm text-slate-400">
+                &copy; 2026 SmartAlbum Sorter. Local Browser Processing.
+            </p>
+        </div>
+    </footer>
+
+    <!-- JavaScript Logic -->
+    <script>
+        // State Management
+        const state = {
+            photos: [], // { id, file, dateStr, dateObj, url, name }
+            isProcessing: false,
+            sortOrder: 'desc'
+        };
+
+        // DOM Elements
+        const dropZone = document.getElementById('dropZone');
+        const fileInput = document.getElementById('fileInput');
+        const uploadSection = document.getElementById('uploadSection');
+        const processingStatus = document.getElementById('processingStatus');
+        const progressText = document.getElementById('progressText');
+        const controlsSection = document.getElementById('controlsSection');
+        const resultsSection = document.getElementById('resultsSection');
+        const sortOrderSelect = document.getElementById('sortOrder');
+        const resetBtn = document.getElementById('resetBtn');
+        const totalCountEl = document.getElementById('totalCount');
+        const groupCountEl = document.getElementById('groupCount');
+        const monthSelect = document.getElementById('monthSelect');
+        const downloadMonthBtn = document.getElementById('downloadMonthBtn');
+
+        // Event Listeners
+        dropZone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            dropZone.classList.add('drop-zone-active');
+        });
+
+        dropZone.addEventListener('dragleave', () => {
+            dropZone.classList.remove('drop-zone-active');
+        });
+
+        dropZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dropZone.classList.remove('drop-zone-active');
+            handleFiles(e.dataTransfer.files);
+        });
+
+        fileInput.addEventListener('change', (e) => {
+            handleFiles(e.target.files);
+        });
+
+        sortOrderSelect.addEventListener('change', (e) => {
+            state.sortOrder = e.target.value;
+            renderResults();
+        });
+
+        resetBtn.addEventListener('click', () => {
+            state.photos = [];
+            resultsSection.innerHTML = '';
+            resultsSection.classList.add('hidden');
+            controlsSection.classList.add('hidden');
+            uploadSection.classList.remove('hidden');
+            resetBtn.classList.add('hidden');
+            fileInput.value = ''; // Reset input
+        });
+
+        downloadMonthBtn.addEventListener('click', () => {
+            if (monthSelect.value) {
+                downloadByMonth(monthSelect.value);
+            }
+        });
+
+        // Core Functions
+        async function handleFiles(fileList) {
+            if (state.isProcessing) return;
+            
+            const files = Array.from(fileList).filter(file => file.type.startsWith('image/'));
+            if (files.length === 0) {
+                alert('请上传图片文件');
+                return;
+            }
+
+            state.isProcessing = true;
+            uploadSection.classList.add('hidden');
+            processingStatus.classList.remove('hidden');
+            
+            let processedCount = 0;
+            const total = files.length;
+            progressText.textContent = `0 / ${total} 已完成`;
+
+            // Process files sequentially to keep progress readable
+            for (const file of files) {
+                try {
+                    const photoData = await extractPhotoData(file);
+                    state.photos.push(photoData);
+                } catch (error) {
+                    console.error('Error processing file:', file.name, error);
+                } finally {
+                    processedCount++;
+                    progressText.textContent = `${processedCount} / ${total} 已完成`;
+                }
+            }
+
+            state.isProcessing = false;
+            processingStatus.classList.add('hidden');
+            
+            if (state.photos.length > 0) {
+                controlsSection.classList.remove('hidden');
+                resultsSection.classList.remove('hidden');
+                resetBtn.classList.remove('hidden');
+                renderResults();
+            } else {
+                alert('未能识别任何有效图片信息');
+                uploadSection.classList.remove('hidden');
+            }
+        }
+
+        function extractPhotoData(file) {
+            return new Promise((resolve) => {
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    const img = new Image();
+                    img.src = e.target.result;
+                    
+                    img.onload = () => {
+                        // Try to get EXIF data
+                        EXIF.getData(img, function() {
+                            const dateOriginal = EXIF.getTag(this, "DateTimeOriginal");
+                            const dateDigitized = EXIF.getTag(this, "DateTimeDigitized");
+                            
+                            let dateStr = "";
+                            let dateObj = null;
+
+                            // Priority: DateTimeOriginal > DateTimeDigitized > File LastModified
+                            if (dateOriginal) {
+                                dateStr = formatExifDate(dateOriginal);
+                            } else if (dateDigitized) {
+                                dateStr = formatExifDate(dateDigitized);
+                            } else {
+                                // Fallback to file last modified time
+                                const lastMod = new Date(file.lastModified);
+                                dateStr = formatDateObj(lastMod);
+                            }
+
+                            // Parse the string back to a Date object for sorting
+                            // Format expected: YYYY-MM-DD
+                            const parts = dateStr.split('-');
+                            if (parts.length === 3) {
+                                dateObj = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
+                            } else {
+                                dateObj = new Date(); // Fallback
+                            }
+
+                            resolve({
+                                id: Math.random().toString(36).substr(2, 9),
+                                file: file,
+                                url: e.target.result,
+                                dateStr: dateStr,
+                                dateObj: dateObj,
+                                name: file.name
+                            });
+                        });
+                    };
+
+                    img.onerror = () => {
+                        // Even if image can't decode, still group by file time
+                        const lastMod = new Date(file.lastModified);
+                        const dateStr = formatDateObj(lastMod);
+                        resolve({
+                            id: Math.random().toString(36).substr(2, 9),
+                            file: file,
+                            url: e.target.result,
+                            dateStr: dateStr,
+                            dateObj: lastMod,
+                            name: file.name
+                        });
+                    };
+                };
+                reader.readAsDataURL(file);
+            });
+        }
+
+        function formatExifDate(exifDateStr) {
+            // EXIF format: "YYYY:MM:DD HH:MM:SS"
+            if (!exifDateStr) return "";
+            const datePart = exifDateStr.split(' ')[0];
+            const parts = datePart.split(':');
+            if (parts.length === 3) {
+                return `${parts[0]}-${parts[1]}-${parts[2]}`;
+            }
+            return exifDateStr;
+        }
+
+        function formatDateObj(date) {
+            const y = date.getFullYear();
+            const m = String(date.getMonth() + 1).padStart(2, '0');
+            const d = String(date.getDate()).padStart(2, '0');
+            return `${y}-${m}-${d}`;
+        }
+
+        function renderResults() {
+            resultsSection.innerHTML = '';
+            
+            // Group by Date
+            const groups = {};
+            state.photos.forEach(photo => {
+                if (!groups[photo.dateStr]) {
+                    groups[photo.dateStr] = [];
+                }
+                groups[photo.dateStr].push(photo);
+            });
+
+            // Sort Groups
+            const sortedDates = Object.keys(groups).sort((a, b) => {
+                if (state.sortOrder === 'desc') {
+                    return b.localeCompare(a);
+                } else {
+                    return a.localeCompare(b);
+                }
+            });
+
+            // Update Stats
+            totalCountEl.textContent = `共 ${state.photos.length} 张照片`;
+            groupCountEl.textContent = `分为 ${sortedDates.length} 组`;
+
+            // Refresh the "download by month" selector
+            populateMonthOptions();
+
+            // Render Each Group
+            sortedDates.forEach(date => {
+                const groupContainer = document.createElement('div');
+                groupContainer.className = 'bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden fade-in';
+                
+                // Group Header (clickable to collapse/expand)
+                const header = document.createElement('div');
+                header.className = 'bg-slate-50 px-6 py-4 border-b border-slate-100 flex justify-between items-center cursor-pointer select-none hover:bg-slate-100 transition-colors';
+                header.addEventListener('click', (ev) => {
+                    if (ev.target.closest('.download-btn')) return;
+                    groupContainer.classList.toggle('group-collapsed');
+                });
+                header.innerHTML = `
+                    <div class="flex items-center gap-2">
+                        <i class="fa-solid fa-chevron-down chevron text-slate-400"></i>
+                        <i class="fa-regular fa-calendar-days text-blue-500"></i>
+                        <h3 class="font-bold text-slate-700 text-lg">${date}</h3>
+                        <span class="bg-blue-100 text-blue-800 text-xs font-medium px-2.5 py-0.5 rounded-full">${groups[date].length} 张</span>
+                    </div>
+                    <button class="download-btn text-slate-400 hover:text-blue-600 transition-colors text-sm" onclick="downloadGroup('${date}')">
+                        <i class="fa-solid fa-download mr-1"></i> 下载本组
+                    </button>
+                `;
+                groupContainer.appendChild(header);
+
+                // Collapsible body wrapper
+                const body = document.createElement('div');
+                body.className = 'group-body';
+                body.style.maxHeight = '5000px';
+
+                // Photo Grid
+                const grid = document.createElement('div');
+                grid.className = 'grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4 p-6';
+                
+                groups[date].forEach(photo => {
+                    const card = document.createElement('div');
+                    card.className = 'photo-card relative group aspect-square bg-slate-100 rounded-lg overflow-hidden cursor-pointer';
+                    card.innerHTML = `
+                        <img src="${photo.url}" alt="Photo taken on ${photo.dateStr}" class="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110">
+                        <div class="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-20 transition-all duration-300 flex items-center justify-center opacity-0 group-hover:opacity-100">
+                            <button class="bg-white text-slate-800 px-3 py-1 rounded-full text-xs font-bold shadow-lg transform translate-y-4 group-hover:translate-y-0 transition-transform duration-300" onclick="viewPhoto('${photo.id}')">
+                                查看大图
+                            </button>
+                        </div>
+                        <div class="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/60 to-transparent p-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <p class="text-white text-xs truncate">${photo.name}</p>
+                        </div>
+                    `;
+                    grid.appendChild(card);
+                });
+
+                body.appendChild(grid);
+                groupContainer.appendChild(body);
+                resultsSection.appendChild(groupContainer);
+            });
+        }
+
+        // Helper for global scope access (single-file, no modules)
+        window.viewPhoto = (id) => {
+            const photo = state.photos.find(p => p.id === id);
+            if (photo) {
+                const win = window.open();
+                win.document.write(`<img src="${photo.url}" style="max-width:100%">`);
+            }
+        };
+
+        // Populate the month dropdown based on current photos (YYYY-MM)
+        function populateMonthOptions() {
+            const monthMap = {};
+            state.photos.forEach(photo => {
+                const month = photo.dateStr.slice(0, 7); // YYYY-MM
+                monthMap[month] = (monthMap[month] || 0) + 1;
+            });
+
+            const months = Object.keys(monthMap).sort((a, b) => {
+                return state.sortOrder === 'asc' ? a.localeCompare(b) : b.localeCompare(a);
+            });
+
+            const previous = monthSelect.value;
+            monthSelect.innerHTML = months
+                .map(m => `<option value="${m}">${m} (${monthMap[m]} 张)</option>`)
+                .join('');
+
+            // Keep the previous selection if it still exists
+            if (previous && months.includes(previous)) {
+                monthSelect.value = previous;
+            }
+            downloadMonthBtn.disabled = months.length === 0;
+        }
+
+        // Package the given photos into a ZIP and trigger a browser download
+        async function zipAndDownload(photos, zipName, triggerBtn) {
+            if (!photos || photos.length === 0) {
+                alert('该时间段没有可下载的照片');
+                return;
+            }
+            if (typeof JSZip === 'undefined') {
+                alert('压缩组件 (JSZip) 未加载，无法打包下载');
+                return;
+            }
+
+            // Show a loading state on the button that started the download
+            let originalHtml = '';
+            if (triggerBtn) {
+                originalHtml = triggerBtn.innerHTML;
+                triggerBtn.disabled = true;
+                triggerBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-1"></i> 打包中...';
+            }
+
+            try {
+                const zip = new JSZip();
+                const usedNames = {};
+                photos.forEach(photo => {
+                    // Avoid duplicate file names inside the archive
+                    let name = photo.name || `${photo.id}.jpg`;
+                    if (usedNames[name] !== undefined) {
+                        usedNames[name]++;
+                        const dot = name.lastIndexOf('.');
+                        if (dot > 0) {
+                            name = `${name.slice(0, dot)}_${usedNames[name]}${name.slice(dot)}`;
+                        } else {
+                            name = `${name}_${usedNames[name]}`;
+                        }
+                    } else {
+                        usedNames[photo.name || name] = 0;
+                    }
+                    zip.file(name, photo.file);
+                });
+
+                const blob = await zip.generateAsync({ type: 'blob' });
+                const link = document.createElement('a');
+                link.href = URL.createObjectURL(blob);
+                link.download = `${zipName}.zip`;
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+                URL.revokeObjectURL(link.href);
+            } catch (err) {
+                console.error('打包下载失败:', err);
+                alert('打包下载失败：' + err.message);
+            } finally {
+                if (triggerBtn) {
+                    triggerBtn.disabled = false;
+                    triggerBtn.innerHTML = originalHtml;
+                }
+            }
+        }
+
+        // Download all photos taken in a given month (YYYY-MM)
+        window.downloadByMonth = (month) => {
+            const photos = state.photos.filter(p => p.dateStr.slice(0, 7) === month);
+            zipAndDownload(photos, `照片_${month}`, downloadMonthBtn);
+        };
+
+        window.downloadGroup = (date) => {
+            const photos = state.photos.filter(p => p.dateStr === date);
+            zipAndDownload(photos, `照片_${date}`);
+        };
+
+</script>    
+</body>
+</html>

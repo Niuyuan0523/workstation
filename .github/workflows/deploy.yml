@@ -130,7 +130,16 @@ jobs:
             echo "✗ Warning: git-ultra folder not found"
           fi
           
-          # 4. 最后复制 hive-ui 文件到 build/hive-ui/ 目录
+          # 4. 复制 photo-organizer 静态页面（智能相册整理助手）
+          if [ -d "photo-organizer" ]; then
+            mkdir -p build/photo-organizer
+            cp -r photo-organizer/* build/photo-organizer/
+            echo "✓ Copied photo-organizer files to build/photo-organizer/"
+          else
+            echo "✗ Warning: photo-organizer folder not found"
+          fi
+          
+          # 5. 最后复制 hive-ui 文件到 build/hive-ui/ 目录
           if [ -d "hive-ui" ] && [ "$(ls -A hive-ui 2>/dev/null)" ]; then
             mkdir -p build/hive-ui
             rsync -av --ignore-existing hive-ui/ build/hive-ui/

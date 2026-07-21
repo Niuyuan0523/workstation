@@ -33,6 +33,13 @@ const colorMap = {
         hoverBg: 'group-hover:bg-orange-500',
         linkText: 'text-orange-400'
     },
+    indigo: {
+        gradient: 'from-indigo-600 to-blue-600',
+        bg: 'bg-indigo-500/20',
+        text: 'text-indigo-400',
+        hoverBg: 'group-hover:bg-indigo-500',
+        linkText: 'text-indigo-400'
+    },
     slate: {
         gradient: '',
         bg: 'bg-slate-700/50',
@@ -83,6 +90,16 @@ const projectsConfig = {
             icon: "fa-git-alt fa-brands",
             color: "orange",
             url: "./git-ultra/",
+            status: "active"
+        },
+        {
+            id: "photo-organizer",
+            title: "智能相册整理助手",
+            description: "纯前端照片 EXIF 信息读取与分类工具。使用 exif-js 提取拍摄时间（无则回退文件修改时间），按日期自动分组为折叠卡片。支持拖拽上传、实时进度与正倒序切换，全程本地处理不上传服务器。",
+            tech: "exif-js / Tailwind",
+            icon: "fa-images",
+            color: "indigo",
+            url: "./photo-organizer/",
             status: "active"
         },
         {
