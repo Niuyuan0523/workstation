@@ -4,6 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { getCourse, courses, categories, knownVideoSrcs } from '../config'
 import type { Course, ChoiceQuestion } from '../types/quiz'
 import RegionEditor from '../components/RegionEditor.vue'
+import XgPlayer from '../components/XgPlayer.vue'
 
 /**
  * 配置页：编辑某个视频的试题（热区/题目/暂停时间），并「保存」到配置文件。
@@ -62,8 +63,14 @@ function toggleMute() {
   if (videoRef.value) videoRef.value.muted = muted.value
 }
 
-function onMeta(e: Event) {
-  const v = e.target as HTMLVideoElement
+/** xgplayer 就绪：拿到底层 <video> 供播放/跳帧/静音等沿用既有控制 */
+function onReady(v: HTMLVideoElement) {
+  videoRef.value = v
+  v.muted = muted.value
+  if (v.readyState >= 1) onMeta(v)
+}
+
+function onMeta(v: HTMLVideoElement) {
   duration.value = v.duration
   if (v.videoWidth && v.videoHeight) videoAspect.value = `${v.videoWidth} / ${v.videoHeight}`
 }
@@ -257,13 +264,11 @@ function fmt(sec: number) {
       <!-- 左：视频 + 热区编辑器 -->
       <div class="edit-main">
         <div class="video-wrap" :style="{ aspectRatio: videoAspect }">
-          <video
-            ref="videoRef"
+          <XgPlayer
             class="video"
             :src="data.videoSrc"
             :muted="muted"
-            playsinline
-            preload="metadata"
+            @ready="onReady"
             @loadedmetadata="onMeta"
             @timeupdate="onTime"
             @play="isPlaying = true"

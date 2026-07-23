@@ -2,6 +2,58 @@
   "id": "astro-starry",
   "title": "星空漫游（示例·待替换视频与试题）",
   "category": "天文",
-  "videoSrc": "/videos/insect.mp4",
-  "questions": []
+  "videoSrc": "/videos/一起抓小偷.mp4",
+  "questions": [
+    {
+      "id": "q1",
+      "type": "choice",
+      "pauseTime": 25,
+      "title": "",
+      "resumeMode": "onCorrect",
+      "regions": [
+        {
+          "id": "opt1",
+          "label": "",
+          "x": 25,
+          "y": 10.9,
+          "width": 8.2,
+          "height": 14.4
+        },
+        {
+          "id": "opt2",
+          "label": "",
+          "x": 41.5,
+          "y": 11.3,
+          "width": 9.9,
+          "height": 14.8,
+          "correct": true
+        },
+        {
+          "id": "opt3",
+          "label": "",
+          "x": 59.8,
+          "y": 9.7,
+          "width": 8.8,
+          "height": 16.9
+        }
+      ]
+    },
+    {
+      "id": "q2",
+      "type": "choice",
+      "pauseTime": 32,
+      "title": "",
+      "resumeMode": "onCorrect",
+      "regions": [
+        {
+          "id": "opt1",
+          "label": "",
+          "x": 77.2,
+          "y": 53,
+          "width": 7.9,
+          "height": 25.8
+        }
+      ]
+    }
+  ]
 }

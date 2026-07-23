@@ -3,6 +3,7 @@ import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import { useVideoQuiz } from '../composables/useVideoQuiz'
 import type { Course, AnswerRegion } from '../types/quiz'
 import QuestionOverlay from './QuestionOverlay.vue'
+import XgPlayer from './XgPlayer.vue'
 import { playWrongSound } from '../utils/sound'
 
 const props = defineProps<{
@@ -83,10 +84,14 @@ async function onFsChange() {
 onMounted(() => document.addEventListener('fullscreenchange', onFsChange))
 onBeforeUnmount(() => document.removeEventListener('fullscreenchange', onFsChange))
 
+/** xgplayer 就绪：拿到底层 <video> 交给答题状态机沿用既有逻辑 */
+function onReady(v: HTMLVideoElement) {
+  videoRef.value = v
+}
+
 /** 视频宽高比，加载后按真实尺寸设置，保证热区与画面精确对齐 */
 const videoAspect = ref('16 / 9')
-function onMeta(e: Event) {
-  const v = e.target as HTMLVideoElement
+function onMeta(v: HTMLVideoElement) {
   if (v.videoWidth && v.videoHeight) {
     videoAspect.value = `${v.videoWidth} / ${v.videoHeight}`
   }
@@ -153,21 +158,18 @@ function fmt(sec: number) {
 
     <!-- 视频舞台 -->
     <div ref="wrapRef" class="video-wrap" :style="wrapStyle">
-      <video
-        ref="videoRef"
+      <XgPlayer
         class="video"
         :src="course.videoSrc"
-        playsinline
-        webkit-playsinline="true"
-        x5-playsinline
-        x5-video-player-type="h5-page"
-        x5-video-player-fullscreen="false"
-        disablepictureinpicture
-        disableremoteplayback
-        controlslist="nodownload nofullscreen noremoteplayback"
-        preload="metadata"
+        @ready="onReady"
         @loadedmetadata="onMeta"
-        @click="started && !activeQuestion && togglePlay()"
+      />
+
+      <!-- 透明点击层：起播后点击画面暂停/续播（答题、结束时不响应） -->
+      <div
+        v-if="started && !activeQuestion && !ended"
+        class="click-layer"
+        @click="togglePlay"
       />
 
       <!-- 开始播放遮罩 -->
@@ -311,6 +313,13 @@ function fmt(sec: number) {
   height: 100%;
   object-fit: fill;
   display: block;
+}
+/* 点击层：位于画面之上、各类业务浮层之下 */
+.click-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  cursor: pointer;
 }
 
 /* 全屏按钮 + 全屏态 */
