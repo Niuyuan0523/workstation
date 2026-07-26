@@ -148,7 +148,16 @@ jobs:
             echo "✗ Warning: doc-image-extractor folder not found"
           fi
           
-          # 6. 最后复制 hive-ui 文件到 build/hive-ui/ 目录
+          # 6. 复制 block-jump 静态页面（方块跳跳消小游戏）
+          if [ -d "block-jump" ]; then
+            mkdir -p build/block-jump
+            cp -r block-jump/* build/block-jump/
+            echo "✓ Copied block-jump files to build/block-jump/"
+          else
+            echo "✗ Warning: block-jump folder not found"
+          fi
+          
+          # 7. 最后复制 hive-ui 文件到 build/hive-ui/ 目录
           if [ -d "hive-ui" ] && [ "$(ls -A hive-ui 2>/dev/null)" ]; then
             mkdir -p build/hive-ui
             rsync -av --ignore-existing hive-ui/ build/hive-ui/

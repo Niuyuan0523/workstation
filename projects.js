@@ -113,6 +113,16 @@ const projectsConfig = {
             status: "active"
         },
         {
+            id: "block-jump",
+            title: "方块跳跳消",
+            description: "融合《跳一跳》按压蓄力跳跃与《羊了个羊》堆叠消除的休闲小游戏。按住蓄力、松开起跳，落到相同图案的平台直接消除得分，不同图案进入收集槽凑三消除。单种操作 3 秒开局，单局 2-5 分钟，适配碎片时间。",
+            tech: "Canvas / WebAudio",
+            icon: "fa-gamepad",
+            color: "purple",
+            url: "./block-jump/",
+            status: "active"
+        },
+        {
             id: "project-d",
             title: "更多项目...",
             description: "正在开发中。后续将在此处添加更多演示项目，如 Node.js 全栈应用或其他创意项目。",

@@ -1,0 +1,643 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>方块跳跳消 - 按压蓄力跳跃 × 堆叠消除</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+        html, body {
+            width: 100%; height: 100%; overflow: hidden;
+            font-family: 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif;
+            background: #1e293b;
+            touch-action: none;
+            user-select: none; -webkit-user-select: none;
+        }
+        #game { display: block; width: 100vw; height: 100vh; }
+
+        /* ---------- HUD ---------- */
+        .hud { position: fixed; z-index: 10; pointer-events: none; }
+        #scoreBox {
+            top: 14px; left: 14px;
+            background: rgba(15, 23, 42, .55); backdrop-filter: blur(8px);
+            border: 1px solid rgba(255,255,255,.12); border-radius: 14px;
+            padding: 8px 16px; color: #fff;
+        }
+        #scoreBox .score { font-size: 26px; font-weight: 800; line-height: 1.1; }
+        #scoreBox .best { font-size: 12px; color: #94a3b8; }
+        #comboTag {
+            top: 18px; left: 50%; transform: translateX(-50%);
+            background: linear-gradient(135deg, #f59e0b, #ef4444);
+            color: #fff; font-weight: 800; font-size: 15px;
+            padding: 5px 14px; border-radius: 999px;
+            opacity: 0; transition: opacity .25s, transform .25s;
+            box-shadow: 0 4px 14px rgba(239,68,68,.4);
+        }
+        #comboTag.show { opacity: 1; transform: translateX(-50%) scale(1.08); }
+
+        /* ---------- 收集槽 ---------- */
+        #tray {
+            bottom: 18px; left: 50%; transform: translateX(-50%);
+            display: flex; gap: 7px;
+            background: rgba(15, 23, 42, .55); backdrop-filter: blur(8px);
+            border: 1px solid rgba(255,255,255,.12); border-radius: 16px;
+            padding: 8px;
+        }
+        .slot {
+            width: 44px; height: 44px; border-radius: 10px;
+            background: rgba(255,255,255,.08);
+            border: 1px dashed rgba(255,255,255,.18);
+            display: flex; align-items: center; justify-content: center;
+            font-size: 26px; transition: transform .15s;
+        }
+        .slot.filled { border-style: solid; background: rgba(255,255,255,.92); transform: scale(1.02); }
+        .slot.clearing { animation: slotPop .35s ease forwards; }
+        @keyframes slotPop {
+            50% { transform: scale(1.3); background: #fde68a; }
+            100% { transform: scale(0); opacity: 0; }
+        }
+        @media (max-width: 420px) {
+            .slot { width: 36px; height: 36px; font-size: 21px; }
+        }
+
+        /* ---------- 蓄力条 ---------- */
+        #powerWrap {
+            bottom: 84px; left: 50%; transform: translateX(-50%);
+            width: 210px; height: 12px; border-radius: 999px;
+            background: rgba(15,23,42,.55); border: 1px solid rgba(255,255,255,.15);
+            overflow: hidden; opacity: 0; transition: opacity .2s;
+        }
+        #powerWrap.show { opacity: 1; }
+        #powerBar {
+            height: 100%; width: 0%;
+            background: linear-gradient(90deg, #22d3ee, #a78bfa, #f472b6);
+            border-radius: 999px;
+        }
+
+        /* ---------- 遮罩层 ---------- */
+        .overlay {
+            position: fixed; inset: 0; z-index: 20;
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+            background: rgba(15, 23, 42, .62); backdrop-filter: blur(6px);
+            color: #fff; text-align: center; padding: 24px;
+        }
+        .overlay.hidden { display: none; }
+        .overlay h1 {
+            font-size: clamp(34px, 8vw, 56px); font-weight: 900; letter-spacing: 2px;
+            background: linear-gradient(135deg, #22d3ee, #a78bfa, #f472b6);
+            -webkit-background-clip: text; background-clip: text; color: transparent;
+            margin-bottom: 10px;
+        }
+        .overlay .sub { color: #cbd5e1; font-size: 15px; margin-bottom: 22px; }
+        .rules {
+            background: rgba(255,255,255,.07); border: 1px solid rgba(255,255,255,.12);
+            border-radius: 16px; padding: 16px 20px; max-width: 420px;
+            text-align: left; font-size: 14px; line-height: 2; color: #e2e8f0;
+            margin-bottom: 26px;
+        }
+        .rules b { color: #fbbf24; }
+        .btn {
+            pointer-events: auto; cursor: pointer; border: none;
+            font-size: 18px; font-weight: 800; color: #fff;
+            padding: 14px 46px; border-radius: 999px;
+            background: linear-gradient(135deg, #6366f1, #a855f7);
+            box-shadow: 0 8px 24px rgba(139,92,246,.45);
+            transition: transform .15s;
+        }
+        .btn:active { transform: scale(.94); }
+        #overScore { font-size: 54px; font-weight: 900; margin: 6px 0 2px; }
+        #overBest { color: #94a3b8; font-size: 14px; margin-bottom: 24px; }
+        #overReason { font-size: 17px; color: #fca5a5; margin-bottom: 4px; }
+        .backHome {
+            position: fixed; top: 14px; right: 14px; z-index: 30;
+            color: #cbd5e1; text-decoration: none; font-size: 13px;
+            background: rgba(15,23,42,.55); border: 1px solid rgba(255,255,255,.12);
+            padding: 7px 13px; border-radius: 999px; backdrop-filter: blur(8px);
+        }
+    </style>
+</head>
+<body>
+<canvas id="game"></canvas>
+
+<div class="hud" id="scoreBox">
+    <div class="score" id="scoreVal">0</div>
+    <div class="best">最佳 <span id="bestVal">0</span></div>
+</div>
+<div class="hud" id="comboTag">连击 x2</div>
+<div class="hud" id="powerWrap"><div id="powerBar"></div></div>
+<div class="hud" id="tray"></div>
+<a class="backHome" href="../index.html">← 返回主页</a>
+
+<!-- 开始界面 -->
+<div class="overlay" id="startOverlay">
+    <h1>方块跳跳消</h1>
+    <div class="sub">按压蓄力跳跃 × 堆叠消除 · 3 秒开局</div>
+    <div class="rules">
+        🕹️ <b>按住</b>屏幕蓄力，<b>松开</b>起跳<br>
+        ✨ 落到<b>相同图案</b>的平台 → 直接消除得高分<br>
+        📥 不同图案会进入下方<b>收集槽</b>，凑满 <b>3 个相同</b>自动消除<br>
+        ⚠️ 收集槽<b>装满 7 格</b>或<b>落空坠落</b>，游戏结束
+    </div>
+    <button class="btn" id="startBtn">开始游戏</button>
+</div>
+
+<!-- 结束界面 -->
+<div class="overlay hidden" id="overOverlay">
+    <div id="overReason">💥 坠落了！</div>
+    <div id="overScore">0</div>
+    <div id="overBest">最佳 0</div>
+    <button class="btn" id="retryBtn">再来一局</button>
+</div>
+
+<script>
+(() => {
+    'use strict';
+
+    // ==================== 常量与状态 ====================
+    const ICONS = ['🍄', '⭐', '💧', '🍀'];          // 图案种类（少而精，提升配对率）
+    const TRAY_MAX = 7;                              // 收集槽容量
+    const canvas = document.getElementById('game');
+    const ctx = canvas.getContext('2d');
+
+    let vw = 0, vh = 0, dpr = 1, S = 1;              // 视口尺寸 / 缩放系数
+    let groundY = 0;                                 // 平台顶面 y 坐标
+
+    // 游戏状态: ready | charging | jumping | falling | over
+    let state = 'idle';
+    let score = 0, best = +(localStorage.getItem('blockJumpBest') || 0);
+    let matchCombo = 0;                              // 同图案直消连击
+    let tray = [];                                   // 收集槽内容
+    let platforms = [];                              // 场上平台
+    let current = null;                              // 玩家所站平台
+    let candidates = [];                             // 前方两个候选平台
+    let camX = 0, camTarget = 0;                     // 相机
+    let particles = [], popups = [];                 // 粒子 / 飘字
+    let clouds = [];                                 // 背景云
+    let power = 0, chargeStart = 0;
+    let shake = 0;
+
+    const player = { x: 0, y: 0, size: 34, rot: 0, squash: 1 };
+    let jump = null;                                 // 跳跃动画数据
+    let fall = null;                                 // 坠落动画数据
+
+    // ==================== 音效（WebAudio 轻量合成） ====================
+    let actx = null;
+    function beep(freq, dur, type = 'sine', vol = 0.15, slide = 0) {
+        try {
+            if (!actx) actx = new (window.AudioContext || window.webkitAudioContext)();
+            if (actx.state === 'suspended') actx.resume();
+            const o = actx.createOscillator(), g = actx.createGain();
+            o.type = type; o.frequency.value = freq;
+            if (slide) o.frequency.linearRampToValueAtTime(freq + slide, actx.currentTime + dur);
+            g.gain.setValueAtTime(vol, actx.currentTime);
+            g.gain.exponentialRampToValueAtTime(0.001, actx.currentTime + dur);
+            o.connect(g).connect(actx.destination);
+            o.start(); o.stop(actx.currentTime + dur);
+        } catch (e) { /* 忽略音频错误 */ }
+    }
+    const sfx = {
+        jump:  () => beep(300, .25, 'sine', .18, 260),
+        land:  () => beep(200, .12, 'triangle', .2),
+        match: () => { beep(660, .12, 'sine', .18); setTimeout(() => beep(880, .16, 'sine', .18), 90); },
+        clear: () => { [523, 659, 784, 1047].forEach((f, i) => setTimeout(() => beep(f, .14, 'sine', .16), i * 80)); },
+        over:  () => { beep(220, .3, 'sawtooth', .12, -120); setTimeout(() => beep(150, .5, 'sawtooth', .12, -80), 200); },
+        perfect: () => beep(1200, .15, 'sine', .2, 200)
+    };
+
+    // ==================== 工具函数 ====================
+    const rand = (a, b) => a + Math.random() * (b - a);
+    const pick = arr => arr[Math.floor(Math.random() * arr.length)];
+    const lerp = (a, b, t) => a + (b - a) * t;
+
+    function resize() {
+        dpr = Math.min(window.devicePixelRatio || 1, 2);
+        vw = window.innerWidth; vh = window.innerHeight;
+        canvas.width = vw * dpr; canvas.height = vh * dpr;
+        canvas.style.width = vw + 'px'; canvas.style.height = vh + 'px';
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        S = Math.max(0.68, Math.min(1, vw / 520));   // 小屏整体缩短跳跃距离
+        groundY = vh * 0.66;
+    }
+    window.addEventListener('resize', resize);
+    resize();
+
+    // ==================== 平台生成 ====================
+    function makePlatform(x, icon) {
+        return { x, w: rand(66, 94) * S, icon, alpha: 1, sparkle: 0, bounce: 0 };
+    }
+
+    // 在当前平台前方生成两个候选（近 / 远），保证不重叠
+    function spawnCandidates() {
+        const w1 = rand(66, 94) * S, w2 = rand(66, 94) * S;
+        const d1 = rand(125, 195) * S;
+        const gap = (w1 + w2) / 2 + 26 * S;
+        const d2 = d1 + gap + rand(10, 70) * S;
+
+        let i1 = pick(ICONS), i2 = pick(ICONS);
+        // 若两个都不匹配当前图案，有一定概率强制一个匹配，保证可玩性
+        if (current && i1 !== current.icon && i2 !== current.icon && Math.random() < 0.4) {
+            if (Math.random() < 0.5) i1 = current.icon; else i2 = current.icon;
+        }
+        const p1 = makePlatform(current.x + d1, i1); p1.w = w1;
+        const p2 = makePlatform(current.x + d2, i2); p2.w = w2;
+        candidates = [p1, p2];
+        platforms.push(p1, p2);
+    }
+
+    function initClouds() {
+        clouds = [];
+        for (let i = 0; i < 7; i++) {
+            clouds.push({ x: rand(0, vw * 2), y: rand(20, vh * 0.4), r: rand(18, 46), spd: rand(4, 12), depth: rand(0.15, 0.45) });
+        }
+    }
+
+    // ==================== 游戏流程 ====================
+    function reset() {
+        score = 0; matchCombo = 0; tray = [];
+        platforms = []; particles = []; popups = [];
+        camX = 0; camTarget = 0; shake = 0;
+        jump = null; fall = null;
+
+        current = makePlatform(60 * S + 40, pick(ICONS));
+        platforms.push(current);
+        player.x = current.x; player.y = groundY; player.rot = 0; player.squash = 1;
+        spawnCandidates();
+        camTarget = current.x - vw * 0.26; camX = camTarget;
+        initClouds();
+        renderTray(); updateScore();
+        state = 'ready';
+    }
+
+    function updateScore() {
+        document.getElementById('scoreVal').textContent = score;
+        document.getElementById('bestVal').textContent = best;
+    }
+
+    function addScore(n, x, y, text, color) {
+        score += n;
+        updateScore();
+        popups.push({ x, y, text: text || ('+' + n), color: color || '#fff', life: 1 });
+    }
+
+    function showCombo(n) {
+        const tag = document.getElementById('comboTag');
+        if (n >= 2) {
+            tag.textContent = '🔥 连消 x' + n;
+            tag.classList.add('show');
+            clearTimeout(tag._t);
+            tag._t = setTimeout(() => tag.classList.remove('show'), 1400);
+        }
+    }
+
+    // ==================== 收集槽 ====================
+    function renderTray(clearingIcon) {
+        const el = document.getElementById('tray');
+        el.innerHTML = '';
+        for (let i = 0; i < TRAY_MAX; i++) {
+            const d = document.createElement('div');
+            d.className = 'slot' + (tray[i] ? ' filled' : '');
+            if (tray[i]) {
+                d.textContent = tray[i];
+                if (clearingIcon && tray[i] === clearingIcon) d.classList.add('clearing');
+            }
+            el.appendChild(d);
+        }
+    }
+
+    // 落到不同图案平台：图案入槽，凑 3 消除
+    function pushTray(icon, px, py) {
+        tray.push(icon);
+        const count = tray.filter(t => t === icon).length;
+        if (count >= 3) {
+            renderTray(icon);
+            sfx.clear();
+            spawnParticles(px, py - 30, '#fbbf24', 26);
+            setTimeout(() => {
+                let removed = 0;
+                tray = tray.filter(t => !(t === icon && removed++ < 3));
+                renderTray();
+            }, 380);
+            addScore(50, px, py - 70, '三连清除 +50', '#fbbf24');
+            return true;
+        }
+        renderTray();
+        if (tray.length >= TRAY_MAX) {
+            setTimeout(() => gameOver('📥 收集槽满了！'), 450);
+            return false;
+        }
+        return true;
+    }
+
+    // ==================== 跳跃逻辑 ====================
+    function startCharge() {
+        if (state !== 'ready') return;
+        state = 'charging';
+        chargeStart = performance.now();
+        power = 0;
+        document.getElementById('powerWrap').classList.add('show');
+    }
+
+    function releaseJump() {
+        if (state !== 'charging') return;
+        document.getElementById('powerWrap').classList.remove('show');
+        state = 'jumping';
+        sfx.jump();
+
+        const maxD = 400 * S, minD = 60 * S;
+        const dist = minD + power * (maxD - minD);
+        const x0 = player.x, x1 = player.x + dist;
+        const dur = 380 + dist * 0.55;
+        const h = 70 * S + dist * 0.3;
+        jump = { x0, x1, h, t0: performance.now(), dur };
+    }
+
+    function finishJump(landX) {
+        // 判定落点平台
+        const from = current;
+        let landed = null;
+        for (const p of candidates) {
+            if (landX >= p.x - p.w / 2 && landX <= p.x + p.w / 2) { landed = p; break; }
+        }
+        // 跳回原平台也算安全
+        if (!landed && landX >= from.x - from.w / 2 && landX <= from.x + from.w / 2) {
+            player.x = landX; player.y = groundY;
+            state = 'ready'; sfx.land();
+            return;
+        }
+        if (!landed) { startFall(landX); return; }
+
+        player.x = landX; player.y = groundY;
+        landed.bounce = 1;
+        sfx.land();
+        shake = 4;
+
+        // 另一个候选淡出
+        for (const p of candidates) if (p !== landed) p.alpha = 0.99;
+
+        // 基础分 + 完美落点
+        let base = 1;
+        const isPerfect = Math.abs(landX - landed.x) < 9 * S;
+        if (isPerfect) {
+            base += 2;
+            sfx.perfect();
+            addScore(base, landX, groundY - 90, '完美 +' + base, '#22d3ee');
+            spawnParticles(landX, groundY, '#22d3ee', 14);
+        } else {
+            addScore(base, landX, groundY - 90);
+        }
+
+        let trayOk = true;
+        if (landed.icon === from.icon) {
+            // ★ 同图案直接消除
+            matchCombo++;
+            const bonus = 20 * matchCombo;
+            addScore(bonus, landX, groundY - 120, '同图消除 +' + bonus, '#f472b6');
+            showCombo(matchCombo);
+            sfx.match();
+            spawnParticles(landX, groundY - 20, '#f472b6', 22);
+            landed.sparkle = 1;
+            landed.icon = '✨';                       // 被消除的平台变为空白闪光台
+        } else {
+            matchCombo = 0;
+            trayOk = pushTray(landed.icon, landX, groundY);
+        }
+
+        // 旧平台标记淡出，推进相机
+        from.alpha = 0.99;
+        current = landed;
+        candidates = [];
+        if (trayOk || tray.length < TRAY_MAX) spawnCandidates();
+        camTarget = current.x - vw * 0.26;
+
+        state = (tray.length >= TRAY_MAX) ? 'over-wait' : 'ready';
+    }
+
+    function startFall(landX) {
+        state = 'falling';
+        fall = { x: landX, y: groundY, vy: 0, t0: performance.now() };
+        sfx.over();
+        setTimeout(() => gameOver('💥 坠落了！'), 750);
+    }
+
+    function gameOver(reason) {
+        if (state === 'over') return;
+        state = 'over';
+        if (score > best) { best = score; localStorage.setItem('blockJumpBest', best); }
+        document.getElementById('overReason').textContent = reason;
+        document.getElementById('overScore').textContent = score;
+        document.getElementById('overBest').textContent = '最佳 ' + best;
+        document.getElementById('overOverlay').classList.remove('hidden');
+        updateScore();
+    }
+
+    // ==================== 粒子 / 飘字 ====================
+    function spawnParticles(x, y, color, n) {
+        for (let i = 0; i < n; i++) {
+            const a = rand(0, Math.PI * 2), sp = rand(60, 260);
+            particles.push({ x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - 80, life: 1, color, r: rand(2, 5) });
+        }
+    }
+
+    // ==================== 渲染 ====================
+    function roundRect(x, y, w, h, r) {
+        ctx.beginPath();
+        ctx.moveTo(x + r, y);
+        ctx.arcTo(x + w, y, x + w, y + h, r);
+        ctx.arcTo(x + w, y + h, x, y + h, r);
+        ctx.arcTo(x, y + h, x, y, r);
+        ctx.arcTo(x, y, x + w, y, r);
+        ctx.closePath();
+    }
+
+    function drawBackground(dt) {
+        const g = ctx.createLinearGradient(0, 0, 0, vh);
+        g.addColorStop(0, '#312e81'); g.addColorStop(0.5, '#6d28d9'); g.addColorStop(1, '#db2777');
+        ctx.fillStyle = g;
+        ctx.fillRect(0, 0, vw, vh);
+
+        // 云朵（视差）
+        ctx.fillStyle = 'rgba(255,255,255,.16)';
+        for (const c of clouds) {
+            c.x -= c.spd * dt;
+            const sx = ((c.x - camX * c.depth) % (vw + 200) + vw + 200) % (vw + 200) - 100;
+            ctx.beginPath();
+            ctx.arc(sx, c.y, c.r, 0, Math.PI * 2);
+            ctx.arc(sx + c.r * 0.9, c.y + 4, c.r * 0.7, 0, Math.PI * 2);
+            ctx.arc(sx - c.r * 0.8, c.y + 6, c.r * 0.6, 0, Math.PI * 2);
+            ctx.fill();
+        }
+
+        // 地面远景
+        ctx.fillStyle = 'rgba(15,23,42,.35)';
+        ctx.fillRect(0, groundY + 46, vw, vh - groundY - 46);
+    }
+
+    function drawPlatform(p) {
+        const x = p.x - camX, topY = groundY;
+        const h = 46, depth = 12;
+        ctx.save();
+        ctx.globalAlpha = p.alpha;
+        const b = p.bounce > 0 ? Math.sin(p.bounce * Math.PI) * 5 : 0;
+
+        // 柱身
+        ctx.fillStyle = 'rgba(15,23,42,.55)';
+        roundRect(x - p.w / 2 + 4, topY + b + depth, p.w - 8, vh - topY, 6);
+        ctx.fill();
+        // 顶面
+        const grad = ctx.createLinearGradient(x, topY + b, x, topY + b + h);
+        grad.addColorStop(0, '#f8fafc'); grad.addColorStop(1, '#cbd5e1');
+        ctx.fillStyle = grad;
+        roundRect(x - p.w / 2, topY + b, p.w, h, 10);
+        ctx.fill();
+        ctx.strokeStyle = 'rgba(15,23,42,.25)'; ctx.lineWidth = 2;
+        ctx.stroke();
+
+        // 图案
+        if (p.icon) {
+            ctx.font = `${26 * S + 4}px serif`;
+            ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+            ctx.fillText(p.icon, x, topY + b + h / 2 + 2);
+        }
+        // 完美落点中心标记
+        ctx.fillStyle = 'rgba(99,102,241,.5)';
+        ctx.beginPath(); ctx.arc(x, topY + b + 6, 2.5, 0, Math.PI * 2); ctx.fill();
+        ctx.restore();
+
+        if (p.bounce > 0) p.bounce = Math.max(0, p.bounce - 0.08);
+    }
+
+    function drawPlayer() {
+        let px = player.x, py = player.y, rot = 0, squash = 1;
+
+        if (state === 'charging') {
+            squash = 1 - power * 0.32;               // 蓄力下蹲
+        } else if (state === 'jumping' && jump) {
+            const t = Math.min(1, (performance.now() - jump.t0) / jump.dur);
+            px = lerp(jump.x0, jump.x1, t);
+            py = groundY - jump.h * 4 * t * (1 - t);
+            rot = t * Math.PI * 2;
+            player.x = px; player.y = py;
+            if (t >= 1) { jump = null; finishJump(px); }
+        } else if (state === 'falling' && fall) {
+            fall.vy += 22;
+            fall.y += fall.vy * 0.016;
+            px = fall.x; py = fall.y; rot = (performance.now() - fall.t0) / 130;
+        }
+
+        const s = player.size * S + 6;
+        const sh = s * squash, sw = s * (2 - squash);
+        ctx.save();
+        // 影子
+        if (py <= groundY + 4) {
+            const airRatio = Math.max(0, 1 - (groundY - py) / 200);
+            ctx.fillStyle = `rgba(0,0,0,${0.25 * airRatio})`;
+            ctx.beginPath();
+            ctx.ellipse(px - camX, groundY + 4, sw * 0.55 * airRatio + 6, 6, 0, 0, Math.PI * 2);
+            ctx.fill();
+        }
+        ctx.translate(px - camX, py - sh / 2);
+        ctx.rotate(rot);
+        const g = ctx.createLinearGradient(-sw / 2, -sh / 2, sw / 2, sh / 2);
+        g.addColorStop(0, '#38bdf8'); g.addColorStop(1, '#6366f1');
+        ctx.fillStyle = g;
+        roundRect(-sw / 2, -sh / 2, sw, sh, 8);
+        ctx.fill();
+        ctx.strokeStyle = 'rgba(255,255,255,.5)'; ctx.lineWidth = 2; ctx.stroke();
+        // 表情
+        ctx.fillStyle = '#0f172a';
+        ctx.beginPath(); ctx.arc(-sw * 0.18, -sh * 0.1, 3, 0, Math.PI * 2); ctx.fill();
+        ctx.beginPath(); ctx.arc(sw * 0.18, -sh * 0.1, 3, 0, Math.PI * 2); ctx.fill();
+        ctx.strokeStyle = '#0f172a'; ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.arc(0, sh * 0.08, 6, 0.15 * Math.PI, 0.85 * Math.PI); ctx.stroke();
+        ctx.restore();
+    }
+
+    function drawFx(dt) {
+        // 粒子
+        particles = particles.filter(p => p.life > 0);
+        for (const p of particles) {
+            p.life -= dt * 1.6;
+            p.x += p.vx * dt; p.y += p.vy * dt; p.vy += 380 * dt;
+            ctx.globalAlpha = Math.max(0, p.life);
+            ctx.fillStyle = p.color;
+            ctx.beginPath(); ctx.arc(p.x - camX, p.y, p.r, 0, Math.PI * 2); ctx.fill();
+        }
+        ctx.globalAlpha = 1;
+        // 飘字
+        popups = popups.filter(p => p.life > 0);
+        for (const p of popups) {
+            p.life -= dt * 0.9;
+            p.y -= 46 * dt;
+            ctx.globalAlpha = Math.max(0, p.life);
+            ctx.font = '800 20px system-ui';
+            ctx.textAlign = 'center';
+            ctx.fillStyle = p.color;
+            ctx.fillText(p.text, p.x - camX, p.y);
+        }
+        ctx.globalAlpha = 1;
+    }
+
+    // ==================== 主循环 ====================
+    let lastT = performance.now();
+    function loop(now) {
+        const dt = Math.min(0.05, (now - lastT) / 1000);
+        lastT = now;
+
+        // 蓄力进度
+        if (state === 'charging') {
+            power = Math.min(1, (now - chargeStart) / 1300);
+            document.getElementById('powerBar').style.width = (power * 100) + '%';
+        }
+        // 相机平滑跟随 + 震屏
+        camX = lerp(camX, camTarget, 0.08);
+        if (shake > 0) { camX += rand(-shake, shake); shake -= dt * 22; }
+
+        // 淡出旧平台
+        platforms = platforms.filter(p => p.alpha > 0.02);
+        for (const p of platforms) {
+            if (p.alpha < 1 && p !== current) p.alpha -= dt * 1.2;
+            if (p.sparkle > 0) p.sparkle -= dt;
+        }
+
+        drawBackground(dt);
+        for (const p of platforms) drawPlatform(p);
+        drawPlayer();
+        drawFx(dt);
+
+        requestAnimationFrame(loop);
+    }
+    requestAnimationFrame(loop);
+
+    // ==================== 输入 ====================
+    function onPress(e) {
+        if (e.target.closest('.btn') || e.target.closest('.backHome')) return;
+        e.preventDefault();
+        startCharge();
+    }
+    function onRelease(e) {
+        if (e.target && (e.target.closest('.btn') || e.target.closest('.backHome'))) return;
+        releaseJump();
+    }
+    window.addEventListener('mousedown', onPress);
+    window.addEventListener('mouseup', onRelease);
+    window.addEventListener('touchstart', onPress, { passive: false });
+    window.addEventListener('touchend', onRelease);
+    window.addEventListener('keydown', e => { if (e.code === 'Space' && !e.repeat) startCharge(); });
+    window.addEventListener('keyup', e => { if (e.code === 'Space') releaseJump(); });
+    window.addEventListener('contextmenu', e => e.preventDefault());
+
+    document.getElementById('startBtn').addEventListener('click', () => {
+        document.getElementById('startOverlay').classList.add('hidden');
+        reset();
+    });
+    document.getElementById('retryBtn').addEventListener('click', () => {
+        document.getElementById('overOverlay').classList.add('hidden');
+        reset();
+    });
+
+    // 初始渲染收集槽（空槽）
+    renderTray();
+})();
+</script>
+</body>
+</html>
