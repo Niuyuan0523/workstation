@@ -209,8 +209,9 @@
     let fall = null;                                 // 坠落动画数据
 
     // ==================== 音效（WebAudio 轻量合成） ====================
-    let actx = null;
+    let actx = null, audioDead = false;                  // audioDead：页面销毁后禁止重建上下文
     function beep(freq, dur, type = 'sine', vol = 0.15, slide = 0) {
+        if (audioDead) return;
         try {
             if (!actx) actx = new (window.AudioContext || window.webkitAudioContext)();
             if (actx.state === 'suspended') actx.resume();
@@ -223,11 +224,17 @@
             o.start(); o.stop(actx.currentTime + dur);
         } catch (e) { /* 忽略音频错误 */ }
     }
+    // 页面销毁时关闭音频上下文，防止残留 setTimeout 里的 beep 重建一个永不关闭的 AudioContext
+    window.addEventListener('pagehide', () => {
+        audioDead = true;
+        if (actx) { try { actx.close(); } catch (e) {} actx = null; }
+    });
     const sfx = {
         jump:  () => beep(300, .25, 'sine', .18, 260),
         land:  () => beep(200, .12, 'triangle', .2),
         match: () => { beep(660, .12, 'sine', .18); setTimeout(() => beep(880, .16, 'sine', .18), 90); },
         clear: () => { [523, 659, 784, 1047].forEach((f, i) => setTimeout(() => beep(f, .14, 'sine', .16), i * 80)); },
+        fall:  () => beep(700, .6, 'sine', .18, -520),   // 下坠滑音
         over:  () => { beep(220, .3, 'sawtooth', .12, -120); setTimeout(() => beep(150, .5, 'sawtooth', .12, -80), 200); },
         perfect: () => beep(1200, .15, 'sine', .2, 200)
     };
@@ -278,7 +285,8 @@
 
         let i1 = pick(ICONS), i2 = pick(ICONS);
         // 若两个都不匹配当前图案，有一定概率强制一个匹配，保证可玩性
-        if (current && i1 !== current.icon && i2 !== current.icon && Math.random() < 0.4) {
+        // （✨ 空白平台不参与配对，防止复制出可白刷连击分的 ✨ 候选）
+        if (current && ICONS.includes(current.icon) && i1 !== current.icon && i2 !== current.icon && Math.random() < 0.4) {
             if (Math.random() < 0.5) i1 = current.icon; else i2 = current.icon;
         }
         const p1 = makePlatform(current.x + d1, i1); p1.w = w1;
@@ -353,14 +361,14 @@
         tray.push(icon);
         const count = tray.filter(t => t === icon).length;
         if (count >= 3) {
+            // 先用旧槽内容播放消除动画，但逻辑上立即移除，
+            // 避免"第 7 个恰好凑三连"时 finishJump 误判满槽导致死锁
             renderTray(icon);
+            let removed = 0;
+            tray = tray.filter(t => !(t === icon && removed++ < 3));
             sfx.clear();
             spawnParticles(px, py - 30, '#fbbf24', 26);
-            setTimeout(() => {
-                let removed = 0;
-                tray = tray.filter(t => !(t === icon && removed++ < 3));
-                renderTray();
-            }, 380);
+            setTimeout(() => renderTray(), 380);
             addScore(50, px, py - 70, '三连清除 +50', '#fbbf24');
             return true;
         }
@@ -438,7 +446,7 @@
         }
 
         let trayOk = true;
-        if (landed.icon === from.icon) {
+        if (landed.icon === from.icon && ICONS.includes(from.icon)) {
             // ★ 同图案直接消除
             matchCombo++;
             const bonus = 20 * matchCombo;
@@ -466,13 +474,14 @@
     function startFall(landX) {
         state = 'falling';
         fall = { x: landX, y: player.y, vy: 0, t0: performance.now() };
-        sfx.over();
+        sfx.fall();                                   // 坠落下滑音
         setTimeout(() => gameOver('💥 坠落了！'), 750);
     }
 
     function gameOver(reason) {
         if (state === 'over') return;
         state = 'over';
+        sfx.over();
         if (score > best) { best = score; localStorage.setItem('blockJumpBest', best); }
         document.getElementById('overReason').textContent = reason;
         document.getElementById('overScore').textContent = score;
@@ -670,12 +679,16 @@
 
     // ==================== 输入 ====================
     function onPress(e) {
-        if (e.target.closest('.btn') || e.target.closest('.backHome')) return;
+        // 按下时拦截按钮/返回链接，避免误触蓄力（对应小程序版 catchtap 问题）
+        // target 可能不是 Element（如程序化派发的事件），需先判断
+        const t = e.target instanceof Element ? e.target : null;
+        if (t && (t.closest('.btn') || t.closest('.backHome'))) return;
         e.preventDefault();
         startCharge();
     }
-    function onRelease(e) {
-        if (e.target && (e.target.closest('.btn') || e.target.closest('.backHome'))) return;
+    function onRelease() {
+        // 松开无条件放行：未蓄力时 releaseJump 是空操作，
+        // 若在按钮上松开也能正常结束蓄力，避免卡在 charging 状态
         releaseJump();
     }
     window.addEventListener('mousedown', onPress);
