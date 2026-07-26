@@ -160,6 +160,13 @@
                         <i class="fa-solid fa-download mr-1"></i> 下载
                     </button>
                 </div>
+                <button id="downloadAllBtn" class="inline-flex items-center px-4 py-2 text-sm font-medium rounded-lg text-white bg-indigo-600 hover:bg-indigo-700 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed transition-colors">
+                    <i class="fa-solid fa-cloud-arrow-down mr-1"></i> 全部下载
+                </button>
+                <label class="flex items-center gap-2 bg-white p-2 px-3 rounded-lg shadow-sm border border-slate-200 cursor-pointer select-none" title="下载时按拍摄时间重命名，例如 IMG20260723230414.JPG">
+                    <input type="checkbox" id="renameByTime" class="rounded text-blue-600 focus:ring-blue-500" checked>
+                    <span class="text-sm font-medium text-slate-600 whitespace-nowrap"><i class="fa-solid fa-pen-to-square mr-1"></i> 按拍摄时间重命名</span>
+                </label>
             </div>
             
             <div class="flex items-center gap-2">
@@ -208,6 +215,8 @@
         const groupCountEl = document.getElementById('groupCount');
         const monthSelect = document.getElementById('monthSelect');
         const downloadMonthBtn = document.getElementById('downloadMonthBtn');
+        const downloadAllBtn = document.getElementById('downloadAllBtn');
+        const renameByTimeCheckbox = document.getElementById('renameByTime');
 
         // Event Listeners
         dropZone.addEventListener('dragover', (e) => {
@@ -234,7 +243,16 @@
             renderResults();
         });
 
+        renameByTimeCheckbox.addEventListener('change', () => {
+            // Re-render so card labels preview the renamed file names
+            renderResults();
+        });
+
         resetBtn.addEventListener('click', () => {
+            // Release object URLs to free memory before clearing state
+            state.photos.forEach(p => {
+                if (p.url && p.url.startsWith('blob:')) URL.revokeObjectURL(p.url);
+            });
             state.photos = [];
             resultsSection.innerHTML = '';
             resultsSection.classList.add('hidden');
@@ -248,6 +266,10 @@
             if (monthSelect.value) {
                 downloadByMonth(monthSelect.value);
             }
+        });
+
+        downloadAllBtn.addEventListener('click', () => {
+            downloadAll();
         });
 
         // Core Functions
@@ -297,66 +319,62 @@
 
         function extractPhotoData(file) {
             return new Promise((resolve) => {
-                const reader = new FileReader();
-                reader.onload = (e) => {
-                    const img = new Image();
-                    img.src = e.target.result;
-                    
-                    img.onload = () => {
-                        // Try to get EXIF data
-                        EXIF.getData(img, function() {
-                            const dateOriginal = EXIF.getTag(this, "DateTimeOriginal");
-                            const dateDigitized = EXIF.getTag(this, "DateTimeDigitized");
-                            
-                            let dateStr = "";
-                            let dateObj = null;
+                // Use an object URL for preview instead of a base64 data URL:
+                // object URLs are lightweight references, so we avoid keeping a
+                // large base64 copy of every photo in memory.
+                const url = URL.createObjectURL(file);
 
-                            // Priority: DateTimeOriginal > DateTimeDigitized > File LastModified
-                            if (dateOriginal) {
-                                dateStr = formatExifDate(dateOriginal);
-                            } else if (dateDigitized) {
-                                dateStr = formatExifDate(dateDigitized);
-                            } else {
-                                // Fallback to file last modified time
-                                const lastMod = new Date(file.lastModified);
-                                dateStr = formatDateObj(lastMod);
-                            }
+                const build = (dateOriginal, dateDigitized) => {
+                    let dateStr = "";
+                    let dateObj = null;
+                    let dateTimeObj = null;
 
-                            // Parse the string back to a Date object for sorting
-                            // Format expected: YYYY-MM-DD
-                            const parts = dateStr.split('-');
-                            if (parts.length === 3) {
-                                dateObj = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
-                            } else {
-                                dateObj = new Date(); // Fallback
-                            }
-
-                            resolve({
-                                id: Math.random().toString(36).substr(2, 9),
-                                file: file,
-                                url: e.target.result,
-                                dateStr: dateStr,
-                                dateObj: dateObj,
-                                name: file.name
-                            });
-                        });
-                    };
-
-                    img.onerror = () => {
-                        // Even if image can't decode, still group by file time
+                    // Priority: DateTimeOriginal > DateTimeDigitized > File LastModified
+                    if (dateOriginal) {
+                        dateStr = formatExifDate(dateOriginal);
+                        dateTimeObj = parseExifDateTime(dateOriginal);
+                    } else if (dateDigitized) {
+                        dateStr = formatExifDate(dateDigitized);
+                        dateTimeObj = parseExifDateTime(dateDigitized);
+                    } else {
                         const lastMod = new Date(file.lastModified);
-                        const dateStr = formatDateObj(lastMod);
-                        resolve({
-                            id: Math.random().toString(36).substr(2, 9),
-                            file: file,
-                            url: e.target.result,
-                            dateStr: dateStr,
-                            dateObj: lastMod,
-                            name: file.name
-                        });
-                    };
+                        dateStr = formatDateObj(lastMod);
+                        dateTimeObj = lastMod;
+                    }
+
+                    const parts = dateStr.split('-');
+                    if (parts.length === 3) {
+                        dateObj = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
+                    } else {
+                        dateObj = new Date();
+                    }
+                    if (!dateTimeObj) dateTimeObj = dateObj;
+
+                    resolve({
+                        id: Math.random().toString(36).substr(2, 9),
+                        file: file,
+                        url: url,
+                        dateStr: dateStr,
+                        dateObj: dateObj,
+                        dateTimeObj: dateTimeObj,
+                        name: file.name
+                    });
                 };
-                reader.readAsDataURL(file);
+
+                // Read EXIF straight from the file bytes. This avoids decoding the
+                // full-resolution image into memory (the old approach), which is
+                // what exhausted memory and froze the page on large batches.
+                try {
+                    EXIF.getData(file, function () {
+                        build(
+                            EXIF.getTag(this, "DateTimeOriginal"),
+                            EXIF.getTag(this, "DateTimeDigitized")
+                        );
+                    });
+                } catch (err) {
+                    // Non-JPEG or unreadable header: fall back to file time
+                    build(null, null);
+                }
             });
         }
 
@@ -376,6 +394,35 @@
             const m = String(date.getMonth() + 1).padStart(2, '0');
             const d = String(date.getDate()).padStart(2, '0');
             return `${y}-${m}-${d}`;
+        }
+
+        // Parse a full EXIF datetime string "YYYY:MM:DD HH:MM:SS" into a Date (with time)
+        function parseExifDateTime(exifDateStr) {
+            if (!exifDateStr) return null;
+            const m = exifDateStr.match(/^(\d{4}):(\d{2}):(\d{2})\s+(\d{2}):(\d{2}):(\d{2})/);
+            if (m) {
+                return new Date(
+                    Number(m[1]), Number(m[2]) - 1, Number(m[3]),
+                    Number(m[4]), Number(m[5]), Number(m[6])
+                );
+            }
+            return null;
+        }
+
+        // Build a filename based on capture time, e.g. IMG20260723230414.JPG
+        function buildRenamedFileName(photo) {
+            const d = photo.dateTimeObj || photo.dateObj || new Date();
+            const pad = (n) => String(n).padStart(2, '0');
+            const stamp = `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}`
+                + `${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
+            // Keep the original extension (uppercase), default to JPG
+            let ext = 'JPG';
+            const original = photo.name || '';
+            const dot = original.lastIndexOf('.');
+            if (dot > 0 && dot < original.length - 1) {
+                ext = original.slice(dot + 1).toUpperCase();
+            }
+            return `IMG${stamp}.${ext}`;
         }
 
         function renderResults() {
@@ -443,15 +490,18 @@
                 groups[date].forEach(photo => {
                     const card = document.createElement('div');
                     card.className = 'photo-card relative group aspect-square bg-slate-100 rounded-lg overflow-hidden cursor-pointer';
+                    const displayName = (renameByTimeCheckbox && renameByTimeCheckbox.checked)
+                        ? buildRenamedFileName(photo)
+                        : photo.name;
                     card.innerHTML = `
-                        <img src="${photo.url}" alt="Photo taken on ${photo.dateStr}" class="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110">
+                        <img src="${photo.url}" alt="Photo taken on ${photo.dateStr}" loading="lazy" decoding="async" class="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110">
                         <div class="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-20 transition-all duration-300 flex items-center justify-center opacity-0 group-hover:opacity-100">
                             <button class="bg-white text-slate-800 px-3 py-1 rounded-full text-xs font-bold shadow-lg transform translate-y-4 group-hover:translate-y-0 transition-transform duration-300" onclick="viewPhoto('${photo.id}')">
                                 查看大图
                             </button>
                         </div>
                         <div class="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/60 to-transparent p-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                            <p class="text-white text-xs truncate">${photo.name}</p>
+                            <p class="text-white text-xs truncate">${displayName}</p>
                         </div>
                     `;
                     grid.appendChild(card);
@@ -516,33 +566,78 @@
             }
 
             try {
-                const zip = new JSZip();
+                const renameEnabled = renameByTimeCheckbox && renameByTimeCheckbox.checked;
                 const usedNames = {};
-                photos.forEach(photo => {
+                // Precompute a unique archive name for every photo
+                const entries = photos.map(photo => {
+                    let name = renameEnabled
+                        ? buildRenamedFileName(photo)
+                        : (photo.name || `${photo.id}.jpg`);
                     // Avoid duplicate file names inside the archive
-                    let name = photo.name || `${photo.id}.jpg`;
                     if (usedNames[name] !== undefined) {
-                        usedNames[name]++;
+                        const baseCount = ++usedNames[name];
                         const dot = name.lastIndexOf('.');
-                        if (dot > 0) {
-                            name = `${name.slice(0, dot)}_${usedNames[name]}${name.slice(dot)}`;
-                        } else {
-                            name = `${name}_${usedNames[name]}`;
-                        }
+                        name = dot > 0
+                            ? `${name.slice(0, dot)}_${baseCount}${name.slice(dot)}`
+                            : `${name}_${baseCount}`;
                     } else {
-                        usedNames[photo.name || name] = 0;
+                        usedNames[name] = 0;
                     }
-                    zip.file(name, photo.file);
+                    return { name, file: photo.file };
                 });
 
-                const blob = await zip.generateAsync({ type: 'blob' });
-                const link = document.createElement('a');
-                link.href = URL.createObjectURL(blob);
-                link.download = `${zipName}.zip`;
-                document.body.appendChild(link);
-                link.click();
-                document.body.removeChild(link);
-                URL.revokeObjectURL(link.href);
+                // Split into size-limited batches so each generated ZIP blob stays
+                // small enough to allocate. A single huge archive is what triggered
+                // "Array buffer allocation failed".
+                const MAX_ZIP_BYTES = 350 * 1024 * 1024; // ~350MB per ZIP part
+                const batches = [];
+                let current = [];
+                let currentBytes = 0;
+                entries.forEach(entry => {
+                    const size = (entry.file && entry.file.size) || 0;
+                    if (current.length > 0 && currentBytes + size > MAX_ZIP_BYTES) {
+                        batches.push(current);
+                        current = [];
+                        currentBytes = 0;
+                    }
+                    current.push(entry);
+                    currentBytes += size;
+                });
+                if (current.length > 0) batches.push(current);
+
+                const multi = batches.length > 1;
+                for (let i = 0; i < batches.length; i++) {
+                    const zip = new JSZip();
+                    batches[i].forEach(entry => zip.file(entry.name, entry.file));
+
+                    const partLabel = multi ? ` (${i + 1}/${batches.length})` : '';
+                    const blob = await zip.generateAsync({
+                        type: 'blob',
+                        // Photos (JPEG/PNG) are already compressed; STORE avoids
+                        // heavy DEFLATE work that freezes the UI on large batches.
+                        compression: 'STORE',
+                        streamFiles: true
+                    }, (metadata) => {
+                        // Report real progress so the UI stays responsive-looking
+                        if (triggerBtn) {
+                            const percent = Math.round(metadata.percent);
+                            triggerBtn.innerHTML = `<i class="fa-solid fa-spinner fa-spin mr-1"></i> 打包中${partLabel} ${percent}%`;
+                        }
+                    });
+
+                    const partName = multi ? `${zipName}_part${i + 1}.zip` : `${zipName}.zip`;
+                    const link = document.createElement('a');
+                    link.href = URL.createObjectURL(blob);
+                    link.download = partName;
+                    document.body.appendChild(link);
+                    link.click();
+                    document.body.removeChild(link);
+                    URL.revokeObjectURL(link.href);
+
+                    // Let the browser start the download and release memory before
+                    // building the next part.
+                    await new Promise(r => setTimeout(r, 300));
+                }
             } catch (err) {
                 console.error('打包下载失败:', err);
                 alert('打包下载失败：' + err.message);
@@ -558,6 +653,11 @@
         window.downloadByMonth = (month) => {
             const photos = state.photos.filter(p => p.dateStr.slice(0, 7) === month);
             zipAndDownload(photos, `照片_${month}`, downloadMonthBtn);
+        };
+
+        // Download every photo currently loaded, packaged into one ZIP
+        window.downloadAll = () => {
+            zipAndDownload(state.photos, '照片_全部', downloadAllBtn);
         };
 
         window.downloadGroup = (date) => {
