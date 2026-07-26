@@ -105,8 +105,8 @@ const projectsConfig = {
         {
             id: "doc-image-extractor",
             title: "文档图片提取器",
-            description: "上传 PDF / PPTX / DOCX 文档，一键提取其中的全部图片。PDF 支持内嵌图片提取与整页转图两种模式，支持预览、单张下载与 ZIP 打包下载，全程本地处理不上传服务器。",
-            tech: "PDF.js / JSZip",
+            description: "上传 PDF / PPTX / DOCX 文档，一键提取其中的全部图片，并支持导出文本内容（文本层直提 + Tesseract OCR 图片文字识别）。图片支持预览、单张下载与 ZIP 打包下载，全程本地处理不上传服务器。",
+            tech: "PDF.js / JSZip / Tesseract",
             icon: "fa-file-export",
             color: "orange",
             url: "./doc-image-extractor/",

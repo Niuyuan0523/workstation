@@ -105,7 +105,7 @@
                     <i class="fa-solid fa-file-arrow-up text-6xl text-rose-200"></i>
                 </div>
                 <h2 class="text-2xl font-semibold text-slate-700 mb-2">拖拽 PDF / PPTX 文件到此处</h2>
-                <p class="text-slate-500 mb-6">支持 .pdf / .pptx / .docx，自动提取文档内的全部图片并支持打包下载。</p>
+                <p class="text-slate-500 mb-6">支持 .pdf / .pptx / .docx，自动提取文档内的全部图片，并可导出文本内容（含 OCR 图片文字识别）。</p>
 
                 <!-- PDF 提取模式 -->
                 <div class="flex flex-wrap items-center justify-center gap-3 mb-6">
@@ -172,6 +172,36 @@
         </section>
 
     </main>
+
+    <!-- Text Result Modal (文本导出 / OCR 结果) -->
+    <div id="textModal" class="hidden fixed inset-0 z-[100] flex items-center justify-center p-4">
+        <div class="absolute inset-0 bg-black/50" onclick="closeTextModal()"></div>
+        <div class="relative bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[85vh] flex flex-col fade-in">
+            <div class="flex items-center justify-between px-6 py-4 border-b border-slate-100">
+                <h3 id="textModalTitle" class="font-bold text-slate-700 truncate pr-4"></h3>
+                <button class="text-slate-400 hover:text-slate-600 transition-colors" onclick="closeTextModal()">
+                    <i class="fa-solid fa-xmark text-lg"></i>
+                </button>
+            </div>
+            <div id="textModalProgress" class="hidden px-6 py-10 text-center">
+                <div class="loader mx-auto mb-4"></div>
+                <p id="textModalProgressText" class="text-sm text-slate-500">准备中...</p>
+                <p class="text-xs text-slate-400 mt-2">关闭窗口可中断识别</p>
+            </div>
+            <textarea id="textModalContent" readonly
+                class="hidden flex-grow mx-6 mt-4 p-4 bg-slate-50 border border-slate-200 rounded-lg text-sm text-slate-700 leading-relaxed resize-none min-h-[320px] focus:outline-none"></textarea>
+            <div id="textModalActions" class="hidden items-center justify-end gap-3 px-6 py-4">
+                <button onclick="copyModalText(this)"
+                    class="inline-flex items-center px-4 py-2 text-sm font-medium rounded-lg text-slate-600 bg-slate-100 hover:bg-slate-200 transition-colors">
+                    <i class="fa-regular fa-copy mr-1"></i> 复制全文
+                </button>
+                <button onclick="downloadModalText()"
+                    class="inline-flex items-center px-4 py-2 text-sm font-medium rounded-lg text-white bg-rose-600 hover:bg-rose-700 transition-colors">
+                    <i class="fa-solid fa-download mr-1"></i> 下载 .txt
+                </button>
+            </div>
+        </div>
+    </div>
 
     <!-- Footer -->
     <footer class="bg-white border-t border-slate-200 mt-auto">
@@ -274,19 +304,20 @@
                 const file = supported[i];
                 progressText.textContent = `(${i + 1}/${supported.length}) ${file.name}`;
                 try {
-                    let images = [];
+                    let result = { images: [], textPages: [] };
                     if (/\.pdf$/i.test(file.name)) {
-                        images = pdfModeSelect.value === 'pages'
+                        result = pdfModeSelect.value === 'pages'
                             ? await extractPdfPages(file)
                             : await extractPdfEmbeddedImages(file);
                     } else {
-                        images = await extractOoxmlMedia(file);
+                        result = await extractOoxmlMedia(file);
                     }
                     state.docs.push({
                         id: Math.random().toString(36).substr(2, 9),
                         fileName: file.name,
                         type: file.name.split('.').pop().toUpperCase(),
-                        images: images
+                        images: result.images,
+                        textPages: result.textPages // 文档自带文本层，[{ label, text }]
                     });
                 } catch (error) {
                     console.error('解析失败:', file.name, error);
@@ -298,13 +329,14 @@
             processingStatus.classList.add('hidden');
 
             const total = state.docs.reduce((n, d) => n + d.images.length, 0);
-            if (total > 0) {
+            const hasText = state.docs.some(d => d.textPages && d.textPages.length > 0);
+            if (total > 0 || hasText) {
                 controlsSection.classList.remove('hidden');
                 resultsSection.classList.remove('hidden');
                 resetBtn.classList.remove('hidden');
                 renderResults();
             } else {
-                alert('未能从文档中提取到任何图片');
+                alert('未能从文档中提取到任何图片或文本');
                 state.docs = [];
                 uploadSection.classList.remove('hidden');
             }
@@ -317,12 +349,15 @@
             const pdf = await pdfjsLib.getDocument({ data }).promise;
             const base = stripExt(file.name);
             const images = [];
+            const textPages = [];
             const skipTiny = skipTinyCheckbox.checked;
             const docSeen = new Set(); // 单文档内去重
 
             for (let p = 1; p <= pdf.numPages; p++) {
                 progressText.textContent = `${file.name} - 第 ${p}/${pdf.numPages} 页`;
                 const page = await pdf.getPage(p);
+                const pageText = await readPdfPageText(page);
+                if (pageText) textPages.push({ label: `第 ${p} 页`, text: pageText });
                 const ops = await page.getOperatorList();
                 let indexInPage = 0;
 
@@ -369,7 +404,20 @@
                 }
                 page.cleanup();
             }
-            return images;
+            return { images, textPages };
+        }
+
+        // 读取 PDF 页面文本层（扫描版 PDF 没有文本层，返回空串）
+        async function readPdfPageText(page) {
+            try {
+                const tc = await page.getTextContent();
+                return tc.items
+                    .map(it => it.str + (it.hasEOL ? '\n' : ''))
+                    .join('')
+                    .trim();
+            } catch (e) {
+                return '';
+            }
         }
 
         // 从 page.objs / pdf.commonObjs 中解析图片对象（带超时保护，大图解码较慢）
@@ -444,10 +492,13 @@
             const pdf = await pdfjsLib.getDocument({ data }).promise;
             const base = stripExt(file.name);
             const images = [];
+            const textPages = [];
 
             for (let p = 1; p <= pdf.numPages; p++) {
                 progressText.textContent = `${file.name} - 渲染第 ${p}/${pdf.numPages} 页`;
                 const page = await pdf.getPage(p);
+                const pageText = await readPdfPageText(page);
+                if (pageText) textPages.push({ label: `第 ${p} 页`, text: pageText });
                 const viewport = page.getViewport({ scale: 2 }); // 2x 保证清晰度
                 const canvas = document.createElement('canvas');
                 canvas.width = Math.floor(viewport.width);
@@ -464,22 +515,24 @@
                 ));
                 page.cleanup();
             }
-            return images;
+            return { images, textPages };
         }
 
-        // ---------- PPTX / DOCX：解压 media 目录 ----------
+        // ---------- PPTX / DOCX：解压 media 目录 + 提取文本 ----------
         async function extractOoxmlMedia(file) {
             if (typeof JSZip === 'undefined') throw new Error('JSZip 未加载');
             const zip = await JSZip.loadAsync(file);
             const base = stripExt(file.name);
             const skipTiny = skipTinyCheckbox.checked;
 
+            const textPages = await extractOoxmlText(zip);
+
             // pptx 图片在 ppt/media/，docx 在 word/media/
             const mediaFiles = Object.keys(zip.files)
                 .filter(path => /^(ppt|word)\/media\//i.test(path) && !zip.files[path].dir)
                 .sort(naturalCompare);
 
-            if (mediaFiles.length === 0) return [];
+            if (mediaFiles.length === 0) return { images: [], textPages };
 
             const mimeMap = {
                 png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg',
@@ -518,7 +571,47 @@
                     blob, width, height, shortName, previewable
                 ));
             }
-            return images;
+            return { images, textPages };
+        }
+
+        // 提取 OOXML 文本：pptx 按幻灯片（<a:t>），docx 按正文段落（<w:t>）
+        async function extractOoxmlText(zip) {
+            const textPages = [];
+            const decodeEntities = (s) => s
+                .replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+                .replace(/&quot;/g, '"').replace(/&apos;/g, "'")
+                .replace(/&#(\d+);/g, (_, n) => String.fromCodePoint(Number(n)))
+                .replace(/&amp;/g, '&');
+
+            // pptx：每张幻灯片一段
+            const slides = Object.keys(zip.files)
+                .filter(p => /^ppt\/slides\/slide\d+\.xml$/i.test(p))
+                .sort(naturalCompare);
+            for (const path of slides) {
+                const xml = await zip.files[path].async('string');
+                // 每个 <a:p> 段落内的 <a:t> 拼成一行
+                const lines = [];
+                for (const para of xml.split(/<\/a:p>/)) {
+                    const runs = [...para.matchAll(/<a:t>([\s\S]*?)<\/a:t>/g)].map(m => decodeEntities(m[1]));
+                    const line = runs.join('').trim();
+                    if (line) lines.push(line);
+                }
+                const num = (path.match(/slide(\d+)\.xml/i) || [])[1];
+                if (lines.length) textPages.push({ label: `幻灯片 ${num}`, text: lines.join('\n') });
+            }
+
+            // docx：正文按段落
+            if (zip.files['word/document.xml']) {
+                const xml = await zip.files['word/document.xml'].async('string');
+                const lines = [];
+                for (const para of xml.split(/<\/w:p>/)) {
+                    const runs = [...para.matchAll(/<w:t[^>]*>([\s\S]*?)<\/w:t>/g)].map(m => decodeEntities(m[1]));
+                    const line = runs.join('');
+                    if (line.trim()) lines.push(line);
+                }
+                if (lines.length) textPages.push({ label: '正文', text: lines.join('\n') });
+            }
+            return textPages;
         }
 
         // ---------- 通用工具 ----------
@@ -607,12 +700,13 @@
                 const header = document.createElement('div');
                 header.className = 'bg-slate-50 px-6 py-4 border-b border-slate-100 flex justify-between items-center cursor-pointer select-none hover:bg-slate-100 transition-colors';
                 header.addEventListener('click', (ev) => {
-                    if (ev.target.closest('.download-btn')) return;
+                    if (ev.target.closest('button')) return;
                     groupContainer.classList.toggle('group-collapsed');
                 });
                 const typeIcon = doc.type === 'PDF' ? 'fa-file-pdf text-rose-500'
                     : doc.type === 'PPTX' ? 'fa-file-powerpoint text-orange-500'
                     : 'fa-file-word text-blue-500';
+                const hasTextLayer = doc.textPages && doc.textPages.length > 0;
                 header.innerHTML = `
                     <div class="flex items-center gap-2 min-w-0">
                         <i class="fa-solid fa-chevron-down chevron text-slate-400"></i>
@@ -620,9 +714,14 @@
                         <h3 class="font-bold text-slate-700 text-lg truncate">${doc.fileName}</h3>
                         <span class="bg-rose-100 text-rose-800 text-xs font-medium px-2.5 py-0.5 rounded-full whitespace-nowrap">${doc.images.length} 张</span>
                     </div>
-                    <button class="download-btn text-slate-400 hover:text-rose-600 transition-colors text-sm whitespace-nowrap" onclick="downloadDoc('${doc.id}', this)">
-                        <i class="fa-solid fa-download mr-1"></i> 打包本文档
-                    </button>
+                    <div class="flex items-center gap-4">
+                        <button class="text-slate-400 hover:text-rose-600 transition-colors text-sm whitespace-nowrap" title="${hasTextLayer ? '导出文档自带的文本内容' : '文档无文本层，将对图片进行 OCR 文字识别'}" onclick="exportDocText('${doc.id}', this)">
+                            <i class="fa-solid fa-file-lines mr-1"></i> 导出文本${hasTextLayer ? '' : ' (OCR)'}
+                        </button>
+                        <button class="download-btn text-slate-400 hover:text-rose-600 transition-colors text-sm whitespace-nowrap" onclick="downloadDoc('${doc.id}', this)">
+                            <i class="fa-solid fa-download mr-1"></i> 打包本文档
+                        </button>
+                    </div>
                 `;
                 groupContainer.appendChild(header);
 
@@ -653,6 +752,9 @@
                                 ${img.previewable ? `
                                 <button class="bg-white text-slate-800 w-9 h-9 rounded-full text-sm shadow-lg transform translate-y-4 group-hover:translate-y-0 transition-transform duration-300" title="查看大图" onclick="viewImage('${doc.id}','${img.id}')">
                                     <i class="fa-solid fa-magnifying-glass-plus"></i>
+                                </button>
+                                <button class="bg-indigo-600 text-white w-9 h-9 rounded-full text-sm shadow-lg transform translate-y-4 group-hover:translate-y-0 transition-transform duration-300" title="识别文字 (OCR)" onclick="ocrImage('${doc.id}','${img.id}')">
+                                    <i class="fa-solid fa-font"></i>
                                 </button>` : ''}
                                 <button class="bg-rose-600 text-white w-9 h-9 rounded-full text-sm shadow-lg transform translate-y-4 group-hover:translate-y-0 transition-transform duration-300" title="下载" onclick="downloadImage('${doc.id}','${img.id}')">
                                     <i class="fa-solid fa-download"></i>
@@ -776,6 +878,177 @@
                 ? `图片_${first}_等${state.docs.length}个文档`
                 : `图片_${first}`;
             zipAndDownload(all, zipName, downloadAllBtn);
+        };
+
+        // ---------- 文本导出 / OCR ----------
+        const textModal = document.getElementById('textModal');
+        const textModalTitle = document.getElementById('textModalTitle');
+        const textModalProgress = document.getElementById('textModalProgress');
+        const textModalProgressText = document.getElementById('textModalProgressText');
+        const textModalContent = document.getElementById('textModalContent');
+        const textModalActions = document.getElementById('textModalActions');
+        let modalTextFileName = 'text.txt'; // 弹窗内"下载 .txt"使用的文件名
+        let ocrCancelled = false;           // 关闭弹窗即中断批量 OCR
+        let ocrProgressPrefix = '';         // 批量识别时的进度前缀，如 "第 3/19 张 "
+
+        function openTextModal(title) {
+            textModalTitle.textContent = title;
+            textModal.classList.remove('hidden');
+            document.body.style.overflow = 'hidden';
+        }
+
+        function showModalProgress(text) {
+            textModalProgress.classList.remove('hidden');
+            textModalContent.classList.add('hidden');
+            textModalActions.classList.add('hidden');
+            textModalActions.classList.remove('flex');
+            textModalProgressText.textContent = text;
+        }
+
+        function showModalText(text, fileName) {
+            modalTextFileName = fileName;
+            textModalProgress.classList.add('hidden');
+            textModalContent.classList.remove('hidden');
+            textModalActions.classList.remove('hidden');
+            textModalActions.classList.add('flex');
+            textModalContent.value = text;
+        }
+
+        window.closeTextModal = () => {
+            ocrCancelled = true;
+            textModal.classList.add('hidden');
+            document.body.style.overflow = '';
+        };
+
+        window.copyModalText = async (btn) => {
+            try {
+                await navigator.clipboard.writeText(textModalContent.value);
+            } catch (e) {
+                // 剪贴板 API 不可用时回退到选中复制
+                textModalContent.select();
+                document.execCommand('copy');
+            }
+            const original = btn.innerHTML;
+            btn.innerHTML = '<i class="fa-solid fa-check mr-1"></i> 已复制';
+            setTimeout(() => { btn.innerHTML = original; }, 1500);
+        };
+
+        window.downloadModalText = () => {
+            const blob = new Blob(['\ufeff' + textModalContent.value], { type: 'text/plain;charset=utf-8' });
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(blob);
+            link.download = modalTextFileName;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            URL.revokeObjectURL(link.href);
+        };
+
+        // Tesseract.js 按需从 CDN 懒加载（首次使用需下载中文语言包，约 10-20MB）
+        const TESSERACT_CDN = 'https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js';
+        let ocrWorkerPromise = null;
+
+        function loadScript(src) {
+            return new Promise((resolve, reject) => {
+                const s = document.createElement('script');
+                s.src = src;
+                s.onload = resolve;
+                s.onerror = () => reject(new Error('脚本加载失败: ' + src));
+                document.head.appendChild(s);
+            });
+        }
+
+        async function getOcrWorker() {
+            if (!window.Tesseract) {
+                showModalProgress('正在加载 OCR 组件...');
+                await loadScript(TESSERACT_CDN);
+            }
+            if (!ocrWorkerPromise) {
+                showModalProgress('正在下载中英文语言包（首次使用约 10-20MB）...');
+                ocrWorkerPromise = Tesseract.createWorker(['chi_sim', 'eng'], 1, {
+                    logger: (m) => {
+                        if (m.status === 'recognizing text') {
+                            textModalProgressText.textContent =
+                                `${ocrProgressPrefix}正在识别文字... ${Math.round(m.progress * 100)}%`;
+                        }
+                    }
+                }).catch(err => {
+                    ocrWorkerPromise = null; // 失败后允许重试
+                    throw err;
+                });
+            }
+            return ocrWorkerPromise;
+        }
+
+        async function recognizeBlob(blob) {
+            const worker = await getOcrWorker();
+            const { data } = await worker.recognize(blob);
+            // 中文识别结果常混入多余空格，压一压
+            return data.text.replace(/[ \t]+\n/g, '\n').replace(/([\u4e00-\u9fff]) (?=[\u4e00-\u9fff])/g, '$1').trim();
+        }
+
+        // 单张图片 OCR
+        window.ocrImage = async (docId, imgId) => {
+            const img = findImage(docId, imgId);
+            if (!img) return;
+            ocrCancelled = false;
+            openTextModal(`识别文字 - ${img.name}`);
+            showModalProgress('准备中...');
+            try {
+                const text = await recognizeBlob(img.blob);
+                if (ocrCancelled) return;
+                showModalText(text || '（未识别到文字）', `${stripExt(img.name)}.txt`);
+            } catch (err) {
+                console.error('OCR 失败:', err);
+                if (!ocrCancelled) showModalText('识别失败：' + (err.message || err), 'error.txt');
+            }
+        };
+
+        // 导出整个文档的文本：优先文档自带文本层，否则对所有图片逐张 OCR
+        window.exportDocText = async (docId) => {
+            const doc = state.docs.find(d => d.id === docId);
+            if (!doc) return;
+            const base = stripExt(doc.fileName);
+
+            // 1) 有文本层：直接汇总展示
+            if (doc.textPages && doc.textPages.length > 0) {
+                const full = doc.textPages
+                    .map(pg => `===== ${pg.label} =====\n${pg.text}`)
+                    .join('\n\n');
+                openTextModal(`文本内容 - ${doc.fileName}`);
+                showModalText(full, `${base}_文本.txt`);
+                return;
+            }
+
+            // 2) 无文本层（扫描版）：OCR 所有可预览图片
+            const targets = doc.images.filter(i => i.previewable);
+            if (targets.length === 0) {
+                alert('该文档没有文本层，也没有可识别的图片');
+                return;
+            }
+            if (!confirm(`该文档没有可直接提取的文本层，将对 ${targets.length} 张图片进行 OCR 文字识别。\n首次使用需下载语言包（约 10-20MB），识别过程可能需要几分钟，是否继续？`)) {
+                return;
+            }
+
+            ocrCancelled = false;
+            openTextModal(`OCR 识别 - ${doc.fileName}`);
+            showModalProgress('准备中...');
+            try {
+                const parts = [];
+                for (let i = 0; i < targets.length; i++) {
+                    if (ocrCancelled) return;
+                    ocrProgressPrefix = `第 ${i + 1}/${targets.length} 张 - `;
+                    textModalProgressText.textContent = `${ocrProgressPrefix}准备识别...`;
+                    const text = await recognizeBlob(targets[i].blob);
+                    parts.push(`===== ${targets[i].origin || targets[i].name} =====\n${text || '（未识别到文字）'}`);
+                }
+                if (ocrCancelled) return;
+                ocrProgressPrefix = '';
+                showModalText(parts.join('\n\n'), `${base}_OCR文本.txt`);
+            } catch (err) {
+                console.error('OCR 失败:', err);
+                if (!ocrCancelled) showModalText('识别失败：' + (err.message || err), 'error.txt');
+            }
         };
 
     </script>

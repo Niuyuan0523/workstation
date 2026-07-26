@@ -142,7 +142,7 @@ npm run build
 | [3D 晶体结构可视化](./3d-display/) | 交互式 3D 晶体结构展示 | Three.js / Vite | ✅ 已完成 |
 | [Git Ultra](https://github.com/niuyuan0523/git-ultra) | AI 辅助的 Git 工作流增强工具 | Node.js / AI / CLI | ✅ 已完成 |
 | [Hive-UI 组件库](https://github.com/niuyuan0523/hive-ui) | Vue 3 组件库展示 | Vue 3 / Vite | 🚧 开发中 |
-| [文档图片提取器](./doc-image-extractor/) | PDF / PPTX / DOCX 图片一键提取与打包下载 | PDF.js / JSZip | ✅ 已完成 |
+| [文档图片提取器](./doc-image-extractor/) | PDF / PPTX / DOCX 图片提取、文本导出与 OCR | PDF.js / JSZip / Tesseract | ✅ 已完成 |
 | Vue 3 管理系统 | 后台管理模板（待添加） | Vue 3 / Vite | 🚧 开发中 |
 | React 电商前台 | 电商展示页面（待添加） | React / Tailwind | 🚧 开发中 |
 
