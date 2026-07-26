@@ -105,6 +105,20 @@
             transition: transform .15s;
         }
         .btn:active { transform: scale(.94); }
+        .btnRow { display: flex; gap: 14px; pointer-events: auto; flex-wrap: wrap; justify-content: center; }
+        .btn.ghost {
+            background: rgba(255,255,255,.12); box-shadow: none;
+            border: 1px solid rgba(255,255,255,.28);
+        }
+        .diffRow { display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; pointer-events: auto; }
+        .diffBtn {
+            display: flex; flex-direction: column; align-items: center; gap: 3px;
+            padding: 13px 24px; font-size: 17px;
+        }
+        .diffBtn small { font-size: 11px; font-weight: 500; opacity: .85; }
+        .diffBtn.easy { background: linear-gradient(135deg, #10b981, #059669); box-shadow: 0 8px 24px rgba(16,185,129,.4); }
+        .diffBtn.medium { background: linear-gradient(135deg, #f59e0b, #ef4444); box-shadow: 0 8px 24px rgba(245,158,11,.4); }
+        .diffBtn.hard { background: linear-gradient(135deg, #06b6d4, #3b82f6); box-shadow: 0 8px 24px rgba(6,182,212,.4); }
         #overScore { font-size: 54px; font-weight: 900; margin: 6px 0 2px; }
         #overBest { color: #94a3b8; font-size: 14px; margin-bottom: 24px; }
         #overReason { font-size: 17px; color: #fca5a5; margin-bottom: 4px; }
@@ -121,7 +135,7 @@
 
 <div class="hud" id="scoreBox">
     <div class="score" id="scoreVal">0</div>
-    <div class="best">最佳 <span id="bestVal">0</span></div>
+    <div class="best">最佳 <span id="bestVal">0</span> · <span id="diffVal">初级</span></div>
 </div>
 <div class="hud" id="comboTag">连击 x2</div>
 <div class="hud" id="powerWrap"><div id="powerBar"></div></div>
@@ -138,7 +152,11 @@
         📥 不同图案会进入下方<b>收集槽</b>，凑满 <b>3 个相同</b>自动消除<br>
         ⚠️ 收集槽<b>装满 7 格</b>或<b>落空坠落</b>，游戏结束
     </div>
-    <button class="btn" id="startBtn">开始游戏</button>
+    <div class="diffRow">
+        <button class="btn diffBtn easy" data-diff="easy">🌱 初级<small>平台固定高度</small></button>
+        <button class="btn diffBtn medium" data-diff="medium">⛰️ 中级<small>平台高低错落</small></button>
+        <button class="btn diffBtn hard" data-diff="hard">🌊 高级<small>平台自动升降</small></button>
+    </div>
 </div>
 
 <!-- 结束界面 -->
@@ -146,7 +164,10 @@
     <div id="overReason">💥 坠落了！</div>
     <div id="overScore">0</div>
     <div id="overBest">最佳 0</div>
-    <button class="btn" id="retryBtn">再来一局</button>
+    <div class="btnRow">
+        <button class="btn" id="retryBtn">再来一局</button>
+        <button class="btn ghost" id="menuBtn">选难度</button>
+    </div>
 </div>
 
 <script>
@@ -156,6 +177,13 @@
     // ==================== 常量与状态 ====================
     const ICONS = ['🍄', '⭐', '💧', '🍀'];          // 图案种类（少而精，提升配对率）
     const TRAY_MAX = 7;                              // 收集槽容量
+    // 难度配置：heightVar=平台高度随机偏移幅度，moveAmp=升降振幅，moveSpd=升降角速度范围
+    const DIFF = {
+        easy:   { label: '初级', heightVar: 0,   moveAmp: 0,  moveSpd: [0, 0] },
+        medium: { label: '中级', heightVar: 110, moveAmp: 0,  moveSpd: [0, 0] },
+        hard:   { label: '高级', heightVar: 70,  moveAmp: 46, moveSpd: [1.1, 2.2] }
+    };
+    let difficulty = 'easy';
     const canvas = document.getElementById('game');
     const ctx = canvas.getContext('2d');
 
@@ -222,8 +250,23 @@
     resize();
 
     // ==================== 平台生成 ====================
-    function makePlatform(x, icon) {
-        return { x, w: rand(66, 94) * S, icon, alpha: 1, sparkle: 0, bounce: 0 };
+    // fixed=true 时生成固定高度的起始平台
+    function makePlatform(x, icon, fixed) {
+        const d = DIFF[difficulty];
+        let baseY = groundY;
+        if (!fixed && d.heightVar > 0) {
+            // 向上偏移多、向下偏移少，避免压到底部收集槽
+            baseY = groundY + rand(-d.heightVar, d.heightVar * 0.45) * S;
+        }
+        const p = {
+            x, w: rand(66, 94) * S, icon, alpha: 1, sparkle: 0, bounce: 0,
+            baseY, y: baseY, amp: 0, phase: rand(0, Math.PI * 2), spd: 0
+        };
+        if (!fixed && d.moveAmp > 0) {
+            p.amp = rand(d.moveAmp * 0.5, d.moveAmp) * S;
+            p.spd = rand(d.moveSpd[0], d.moveSpd[1]);
+        }
+        return p;
     }
 
     // 在当前平台前方生成两个候选（近 / 远），保证不重叠
@@ -258,12 +301,13 @@
         camX = 0; camTarget = 0; shake = 0;
         jump = null; fall = null;
 
-        current = makePlatform(60 * S + 40, pick(ICONS));
+        current = makePlatform(60 * S + 40, pick(ICONS), true);
         platforms.push(current);
-        player.x = current.x; player.y = groundY; player.rot = 0; player.squash = 1;
+        player.x = current.x; player.y = current.y; player.rot = 0; player.squash = 1;
         spawnCandidates();
         camTarget = current.x - vw * 0.26; camX = camTarget;
         initClouds();
+        document.getElementById('diffVal').textContent = DIFF[difficulty].label;
         renderTray(); updateScore();
         state = 'ready';
     }
@@ -348,7 +392,13 @@
         const x0 = player.x, x1 = player.x + dist;
         const dur = 380 + dist * 0.55;
         const h = 70 * S + dist * 0.3;
-        jump = { x0, x1, h, t0: performance.now(), dur };
+        // 落点在松手瞬间即确定，可预先锁定目标平台（供飞行轨迹跟踪其高度）
+        let target = null;
+        for (const p of candidates) {
+            if (x1 >= p.x - p.w / 2 && x1 <= p.x + p.w / 2) { target = p; break; }
+        }
+        if (!target && x1 >= current.x - current.w / 2 && x1 <= current.x + current.w / 2) target = current;
+        jump = { x0, x1, y0: player.y, h, t0: performance.now(), dur, target };
     }
 
     function finishJump(landX) {
@@ -360,13 +410,14 @@
         }
         // 跳回原平台也算安全
         if (!landed && landX >= from.x - from.w / 2 && landX <= from.x + from.w / 2) {
-            player.x = landX; player.y = groundY;
+            player.x = landX; player.y = from.y;
             state = 'ready'; sfx.land();
             return;
         }
         if (!landed) { startFall(landX); return; }
 
-        player.x = landX; player.y = groundY;
+        const landY = landed.y;
+        player.x = landX; player.y = landY;
         landed.bounce = 1;
         sfx.land();
         shake = 4;
@@ -380,10 +431,10 @@
         if (isPerfect) {
             base += 2;
             sfx.perfect();
-            addScore(base, landX, groundY - 90, '完美 +' + base, '#22d3ee');
-            spawnParticles(landX, groundY, '#22d3ee', 14);
+            addScore(base, landX, landY - 90, '完美 +' + base, '#22d3ee');
+            spawnParticles(landX, landY, '#22d3ee', 14);
         } else {
-            addScore(base, landX, groundY - 90);
+            addScore(base, landX, landY - 90);
         }
 
         let trayOk = true;
@@ -391,15 +442,15 @@
             // ★ 同图案直接消除
             matchCombo++;
             const bonus = 20 * matchCombo;
-            addScore(bonus, landX, groundY - 120, '同图消除 +' + bonus, '#f472b6');
+            addScore(bonus, landX, landY - 120, '同图消除 +' + bonus, '#f472b6');
             showCombo(matchCombo);
             sfx.match();
-            spawnParticles(landX, groundY - 20, '#f472b6', 22);
+            spawnParticles(landX, landY - 20, '#f472b6', 22);
             landed.sparkle = 1;
             landed.icon = '✨';                       // 被消除的平台变为空白闪光台
         } else {
             matchCombo = 0;
-            trayOk = pushTray(landed.icon, landX, groundY);
+            trayOk = pushTray(landed.icon, landX, landY);
         }
 
         // 旧平台标记淡出，推进相机
@@ -414,7 +465,7 @@
 
     function startFall(landX) {
         state = 'falling';
-        fall = { x: landX, y: groundY, vy: 0, t0: performance.now() };
+        fall = { x: landX, y: player.y, vy: 0, t0: performance.now() };
         sfx.over();
         setTimeout(() => gameOver('💥 坠落了！'), 750);
     }
@@ -473,7 +524,7 @@
     }
 
     function drawPlatform(p) {
-        const x = p.x - camX, topY = groundY;
+        const x = p.x - camX, topY = p.y;
         const h = 46, depth = 12;
         ctx.save();
         ctx.globalAlpha = p.alpha;
@@ -509,12 +560,16 @@
     function drawPlayer() {
         let px = player.x, py = player.y, rot = 0, squash = 1;
 
-        if (state === 'charging') {
-            squash = 1 - power * 0.32;               // 蓄力下蹲
+        if (state === 'ready' || state === 'charging') {
+            // 站立时跟随所在平台高度（高级难度平台会升降）
+            if (current) { py = current.y; player.y = py; }
+            if (state === 'charging') squash = 1 - power * 0.32;   // 蓄力下蹲
         } else if (state === 'jumping' && jump) {
             const t = Math.min(1, (performance.now() - jump.t0) / jump.dur);
+            // 终点高度实时跟踪目标平台（升降平台在飞行中仍会移动）
+            const yEnd = jump.target ? jump.target.y : Math.max(jump.y0, groundY);
             px = lerp(jump.x0, jump.x1, t);
-            py = groundY - jump.h * 4 * t * (1 - t);
+            py = lerp(jump.y0, yEnd, t) - jump.h * 4 * t * (1 - t);
             rot = t * Math.PI * 2;
             player.x = px; player.y = py;
             if (t >= 1) { jump = null; finishJump(px); }
@@ -527,12 +582,15 @@
         const s = player.size * S + 6;
         const sh = s * squash, sw = s * (2 - squash);
         ctx.save();
-        // 影子
-        if (py <= groundY + 4) {
-            const airRatio = Math.max(0, 1 - (groundY - py) / 200);
+        // 影子（投在目标/所在平台顶面上）
+        const surfY = (state === 'jumping' && jump)
+            ? (jump.target ? jump.target.y : groundY)
+            : (current ? current.y : groundY);
+        if (py <= surfY + 4) {
+            const airRatio = Math.max(0, 1 - (surfY - py) / 200);
             ctx.fillStyle = `rgba(0,0,0,${0.25 * airRatio})`;
             ctx.beginPath();
-            ctx.ellipse(px - camX, groundY + 4, sw * 0.55 * airRatio + 6, 6, 0, 0, Math.PI * 2);
+            ctx.ellipse(px - camX, surfY + 4, sw * 0.55 * airRatio + 6, 6, 0, 0, Math.PI * 2);
             ctx.fill();
         }
         ctx.translate(px - camX, py - sh / 2);
@@ -592,9 +650,11 @@
         camX = lerp(camX, camTarget, 0.08);
         if (shake > 0) { camX += rand(-shake, shake); shake -= dt * 22; }
 
-        // 淡出旧平台
+        // 淡出旧平台 + 高级难度平台升降
         platforms = platforms.filter(p => p.alpha > 0.02);
+        const nowSec = now / 1000;
         for (const p of platforms) {
+            if (p.amp > 0) p.y = p.baseY + Math.sin(nowSec * p.spd + p.phase) * p.amp;
             if (p.alpha < 1 && p !== current) p.alpha -= dt * 1.2;
             if (p.sparkle > 0) p.sparkle -= dt;
         }
@@ -626,13 +686,22 @@
     window.addEventListener('keyup', e => { if (e.code === 'Space') releaseJump(); });
     window.addEventListener('contextmenu', e => e.preventDefault());
 
-    document.getElementById('startBtn').addEventListener('click', () => {
-        document.getElementById('startOverlay').classList.add('hidden');
-        reset();
+    // 难度选择即开局
+    document.querySelectorAll('.diffBtn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            difficulty = btn.dataset.diff;
+            document.getElementById('startOverlay').classList.add('hidden');
+            reset();
+        });
     });
     document.getElementById('retryBtn').addEventListener('click', () => {
         document.getElementById('overOverlay').classList.add('hidden');
         reset();
+    });
+    document.getElementById('menuBtn').addEventListener('click', () => {
+        document.getElementById('overOverlay').classList.add('hidden');
+        document.getElementById('startOverlay').classList.remove('hidden');
+        state = 'idle';
     });
 
     // 初始渲染收集槽（空槽）
