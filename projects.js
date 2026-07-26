@@ -103,6 +103,16 @@ const projectsConfig = {
             status: "active"
         },
         {
+            id: "doc-image-extractor",
+            title: "文档图片提取器",
+            description: "上传 PDF / PPTX / DOCX 文档，一键提取其中的全部图片。PDF 支持内嵌图片提取与整页转图两种模式，支持预览、单张下载与 ZIP 打包下载，全程本地处理不上传服务器。",
+            tech: "PDF.js / JSZip",
+            icon: "fa-file-export",
+            color: "orange",
+            url: "./doc-image-extractor/",
+            status: "active"
+        },
+        {
             id: "project-d",
             title: "更多项目...",
             description: "正在开发中。后续将在此处添加更多演示项目，如 Node.js 全栈应用或其他创意项目。",

@@ -139,7 +139,16 @@ jobs:
             echo "✗ Warning: photo-organizer folder not found"
           fi
           
-          # 5. 最后复制 hive-ui 文件到 build/hive-ui/ 目录
+          # 5. 复制 doc-image-extractor 静态页面（文档图片提取器）
+          if [ -d "doc-image-extractor" ]; then
+            mkdir -p build/doc-image-extractor
+            cp -r doc-image-extractor/* build/doc-image-extractor/
+            echo "✓ Copied doc-image-extractor files to build/doc-image-extractor/"
+          else
+            echo "✗ Warning: doc-image-extractor folder not found"
+          fi
+          
+          # 6. 最后复制 hive-ui 文件到 build/hive-ui/ 目录
           if [ -d "hive-ui" ] && [ "$(ls -A hive-ui 2>/dev/null)" ]; then
             mkdir -p build/hive-ui
             rsync -av --ignore-existing hive-ui/ build/hive-ui/

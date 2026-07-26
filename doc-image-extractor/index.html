@@ -1,0 +1,783 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>文档图片提取器 - PDF / PPT 图片一键导出</title>
+    <!-- Tailwind CSS (local) -->
+    <script src="./vendor/tailwind.min.js"></script>
+    <!-- Font Awesome (local) -->
+    <link rel="stylesheet" href="./vendor/fontawesome/css/all.min.css">
+    <!-- JSZip (local) : 解析 pptx/docx 与打包下载 -->
+    <script src="./vendor/jszip.min.js"></script>
+    <!-- PDF.js (CDN, 固定版本) : 解析 PDF -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+
+    <style>
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: #f1f1f1; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+
+        /* Animations */
+        .fade-in { animation: fadeIn 0.5s ease-in-out; }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .drop-zone-active {
+            border-color: #e11d48;
+            background-color: #fff1f2;
+            transform: scale(1.02);
+        }
+
+        .img-card { transition: all 0.3s ease; }
+        .img-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1);
+        }
+
+        /* Loader */
+        .loader {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #e11d48;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        /* Collapsible group */
+        .group-body { overflow: hidden; transition: max-height 0.4s ease, opacity 0.3s ease; }
+        .group-collapsed .group-body { max-height: 0 !important; opacity: 0; }
+        .group-collapsed .chevron { transform: rotate(-90deg); }
+        .chevron { transition: transform 0.3s ease; }
+
+        /* 棋盘格背景：便于查看透明 PNG */
+        .checker-bg {
+            background-image:
+                linear-gradient(45deg, #e2e8f0 25%, transparent 25%),
+                linear-gradient(-45deg, #e2e8f0 25%, transparent 25%),
+                linear-gradient(45deg, transparent 75%, #e2e8f0 75%),
+                linear-gradient(-45deg, transparent 75%, #e2e8f0 75%);
+            background-size: 16px 16px;
+            background-position: 0 0, 0 8px, 8px -8px, -8px 0;
+        }
+    </style>
+</head>
+<body class="bg-slate-50 text-slate-800 font-sans min-h-screen flex flex-col">
+
+    <!-- Header -->
+    <header class="bg-white shadow-sm sticky top-0 z-50">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+            <div class="flex items-center gap-3">
+                <div class="bg-rose-600 text-white p-2 rounded-lg">
+                    <i class="fa-solid fa-file-export text-xl"></i>
+                </div>
+                <h1 class="text-xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-rose-600 to-orange-500">
+                    DocImage Extractor
+                </h1>
+            </div>
+            <div class="flex items-center gap-4">
+                <button id="resetBtn" class="hidden text-sm text-slate-500 hover:text-red-500 transition-colors">
+                    <i class="fa-solid fa-trash-can mr-1"></i> 清空重置
+                </button>
+                <a href="../" class="text-slate-400 hover:text-rose-600 transition-colors" title="返回主页">
+                    <i class="fa-solid fa-house"></i>
+                </a>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="flex-grow max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 w-full">
+
+        <!-- Upload Section -->
+        <section id="uploadSection" class="mb-10 fade-in">
+            <div class="bg-white rounded-2xl shadow-lg p-8 text-center border-2 border-dashed border-slate-300 transition-all duration-300" id="dropZone">
+                <div class="mb-4">
+                    <i class="fa-solid fa-file-arrow-up text-6xl text-rose-200"></i>
+                </div>
+                <h2 class="text-2xl font-semibold text-slate-700 mb-2">拖拽 PDF / PPTX 文件到此处</h2>
+                <p class="text-slate-500 mb-6">支持 .pdf / .pptx / .docx，自动提取文档内的全部图片并支持打包下载。</p>
+
+                <!-- PDF 提取模式 -->
+                <div class="flex flex-wrap items-center justify-center gap-3 mb-6">
+                    <div class="flex items-center gap-2 bg-slate-50 p-2 rounded-lg border border-slate-200">
+                        <span class="text-sm font-medium text-slate-600 px-2 whitespace-nowrap"><i class="fa-solid fa-file-pdf mr-1 text-rose-500"></i> PDF 模式:</span>
+                        <select id="pdfMode" class="bg-white border-none text-sm rounded-md focus:ring-rose-500 focus:border-rose-500 block p-2">
+                            <option value="embedded">提取内嵌图片（推荐）</option>
+                            <option value="pages">整页转为图片</option>
+                        </select>
+                    </div>
+                    <label class="flex items-center gap-2 bg-slate-50 p-2 px-3 rounded-lg border border-slate-200 cursor-pointer select-none" title="跳过宽和高都小于 48px 的小图（图标、装饰线等）">
+                        <input type="checkbox" id="skipTiny" class="rounded text-rose-600 focus:ring-rose-500" checked>
+                        <span class="text-sm font-medium text-slate-600 whitespace-nowrap"><i class="fa-solid fa-filter mr-1"></i> 过滤小图标 (&lt;48px)</span>
+                    </label>
+                </div>
+
+                <label class="inline-flex items-center px-6 py-3 border border-transparent text-base font-medium rounded-full shadow-sm text-white bg-rose-600 hover:bg-rose-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-rose-500 cursor-pointer transition-all hover:shadow-lg">
+                    <i class="fa-solid fa-folder-open mr-2"></i>
+                    选择文件
+                    <input type="file" id="fileInput" multiple accept=".pdf,.pptx,.docx" class="hidden">
+                </label>
+
+                <div class="mt-4 text-xs text-slate-400">
+                    <i class="fa-solid fa-shield-halved mr-1"></i> 所有处理均在本地浏览器完成，不会上传至服务器
+                </div>
+                <div class="mt-1 text-xs text-slate-400">
+                    <i class="fa-solid fa-circle-info mr-1"></i> 旧版 .ppt / .doc 二进制格式暂不支持，请先另存为 .pptx / .docx
+                </div>
+            </div>
+        </section>
+
+        <!-- Processing Status -->
+        <section id="processingStatus" class="hidden mb-8 text-center">
+            <div class="inline-flex items-center justify-center p-4 bg-white rounded-xl shadow-md">
+                <div class="loader mr-4"></div>
+                <div class="text-left">
+                    <p class="font-medium text-slate-700">正在解析文档...</p>
+                    <p class="text-sm text-slate-500" id="progressText">准备中</p>
+                </div>
+            </div>
+        </section>
+
+        <!-- Controls -->
+        <section id="controlsSection" class="hidden mb-6 flex flex-col sm:flex-row justify-between items-center gap-4 fade-in">
+            <div class="flex flex-wrap items-center gap-3">
+                <button id="downloadAllBtn" class="inline-flex items-center px-4 py-2 text-sm font-medium rounded-lg text-white bg-rose-600 hover:bg-rose-700 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed transition-colors">
+                    <i class="fa-solid fa-file-zipper mr-1"></i> 全部打包下载 (ZIP)
+                </button>
+                <label class="inline-flex items-center px-4 py-2 text-sm font-medium rounded-lg text-rose-600 bg-rose-50 hover:bg-rose-100 border border-rose-200 cursor-pointer transition-colors">
+                    <i class="fa-solid fa-plus mr-1"></i> 继续添加文件
+                    <input type="file" id="fileInputMore" multiple accept=".pdf,.pptx,.docx" class="hidden">
+                </label>
+            </div>
+            <div class="flex items-center gap-2">
+                <span class="text-sm text-slate-500" id="totalCount">共 0 张图片</span>
+                <span class="text-slate-300">|</span>
+                <span class="text-sm text-slate-500" id="fileCount">来自 0 个文档</span>
+            </div>
+        </section>
+
+        <!-- Results -->
+        <section id="resultsSection" class="hidden space-y-8">
+            <!-- Dynamic Content Will Be Injected Here -->
+        </section>
+
+    </main>
+
+    <!-- Footer -->
+    <footer class="bg-white border-t border-slate-200 mt-auto">
+        <div class="max-w-7xl mx-auto py-6 px-4 sm:px-6 lg:px-8">
+            <p class="text-center text-sm text-slate-400">
+                &copy; 2026 DocImage Extractor. Local Browser Processing.
+            </p>
+        </div>
+    </footer>
+
+    <!-- JavaScript Logic -->
+    <script>
+        // PDF.js worker（与主库同版本 CDN）
+        if (window.pdfjsLib) {
+            pdfjsLib.GlobalWorkerOptions.workerSrc =
+                'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+        }
+
+        // State Management
+        const state = {
+            // docs: { id, fileName, type, images: [ { id, name, blob, url, width, height, origin, previewable } ] }
+            docs: [],
+            isProcessing: false,
+            seenKeys: new Set() // 去重：同一文档内重复引用的图片只保留一份
+        };
+
+        // DOM Elements
+        const dropZone = document.getElementById('dropZone');
+        const fileInput = document.getElementById('fileInput');
+        const fileInputMore = document.getElementById('fileInputMore');
+        const uploadSection = document.getElementById('uploadSection');
+        const processingStatus = document.getElementById('processingStatus');
+        const progressText = document.getElementById('progressText');
+        const controlsSection = document.getElementById('controlsSection');
+        const resultsSection = document.getElementById('resultsSection');
+        const resetBtn = document.getElementById('resetBtn');
+        const totalCountEl = document.getElementById('totalCount');
+        const fileCountEl = document.getElementById('fileCount');
+        const downloadAllBtn = document.getElementById('downloadAllBtn');
+        const pdfModeSelect = document.getElementById('pdfMode');
+        const skipTinyCheckbox = document.getElementById('skipTiny');
+
+        const TINY_LIMIT = 48; // 小图过滤阈值（宽高均小于此值时跳过）
+
+        // Event Listeners
+        dropZone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            dropZone.classList.add('drop-zone-active');
+        });
+        dropZone.addEventListener('dragleave', () => {
+            dropZone.classList.remove('drop-zone-active');
+        });
+        dropZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dropZone.classList.remove('drop-zone-active');
+            handleFiles(e.dataTransfer.files);
+        });
+        fileInput.addEventListener('change', (e) => handleFiles(e.target.files));
+        fileInputMore.addEventListener('change', (e) => handleFiles(e.target.files));
+
+        resetBtn.addEventListener('click', () => {
+            state.docs.forEach(doc => doc.images.forEach(img => {
+                if (img.url && img.url.startsWith('blob:')) URL.revokeObjectURL(img.url);
+            }));
+            state.docs = [];
+            state.seenKeys.clear();
+            resultsSection.innerHTML = '';
+            resultsSection.classList.add('hidden');
+            controlsSection.classList.add('hidden');
+            uploadSection.classList.remove('hidden');
+            resetBtn.classList.add('hidden');
+            fileInput.value = '';
+            fileInputMore.value = '';
+        });
+
+        downloadAllBtn.addEventListener('click', () => downloadAll());
+
+        // ---------- 入口：分发不同类型文件 ----------
+        async function handleFiles(fileList) {
+            if (state.isProcessing) return;
+
+            const files = Array.from(fileList);
+            const supported = files.filter(f => /\.(pdf|pptx|docx)$/i.test(f.name));
+            const legacy = files.filter(f => /\.(ppt|doc)$/i.test(f.name));
+
+            if (legacy.length > 0) {
+                alert(`以下文件为旧版二进制格式，暂不支持：\n${legacy.map(f => f.name).join('\n')}\n\n请用 Office / WPS 另存为 .pptx / .docx 后再试。`);
+            }
+            if (supported.length === 0) {
+                if (legacy.length === 0) alert('请上传 .pdf / .pptx / .docx 文件');
+                return;
+            }
+
+            state.isProcessing = true;
+            uploadSection.classList.add('hidden');
+            controlsSection.classList.add('hidden');
+            processingStatus.classList.remove('hidden');
+
+            for (let i = 0; i < supported.length; i++) {
+                const file = supported[i];
+                progressText.textContent = `(${i + 1}/${supported.length}) ${file.name}`;
+                try {
+                    let images = [];
+                    if (/\.pdf$/i.test(file.name)) {
+                        images = pdfModeSelect.value === 'pages'
+                            ? await extractPdfPages(file)
+                            : await extractPdfEmbeddedImages(file);
+                    } else {
+                        images = await extractOoxmlMedia(file);
+                    }
+                    state.docs.push({
+                        id: Math.random().toString(36).substr(2, 9),
+                        fileName: file.name,
+                        type: file.name.split('.').pop().toUpperCase(),
+                        images: images
+                    });
+                } catch (error) {
+                    console.error('解析失败:', file.name, error);
+                    alert(`解析 ${file.name} 失败：${error.message || error}`);
+                }
+            }
+
+            state.isProcessing = false;
+            processingStatus.classList.add('hidden');
+
+            const total = state.docs.reduce((n, d) => n + d.images.length, 0);
+            if (total > 0) {
+                controlsSection.classList.remove('hidden');
+                resultsSection.classList.remove('hidden');
+                resetBtn.classList.remove('hidden');
+                renderResults();
+            } else {
+                alert('未能从文档中提取到任何图片');
+                state.docs = [];
+                uploadSection.classList.remove('hidden');
+            }
+        }
+
+        // ---------- PDF：提取内嵌图片 ----------
+        async function extractPdfEmbeddedImages(file) {
+            if (!window.pdfjsLib) throw new Error('PDF.js 未加载（请检查网络后刷新页面）');
+            const data = await file.arrayBuffer();
+            const pdf = await pdfjsLib.getDocument({ data }).promise;
+            const base = stripExt(file.name);
+            const images = [];
+            const skipTiny = skipTinyCheckbox.checked;
+            const docSeen = new Set(); // 单文档内去重
+
+            for (let p = 1; p <= pdf.numPages; p++) {
+                progressText.textContent = `${file.name} - 第 ${p}/${pdf.numPages} 页`;
+                const page = await pdf.getPage(p);
+                const ops = await page.getOperatorList();
+                let indexInPage = 0;
+
+                for (let i = 0; i < ops.fnArray.length; i++) {
+                    const fn = ops.fnArray[i];
+                    let imgObj = null;
+                    let objName = null;
+
+                    if (fn === pdfjsLib.OPS.paintImageXObject) {
+                        objName = ops.argsArray[i][0];
+                        imgObj = await resolvePdfObject(page, pdf, objName);
+                    } else if (fn === pdfjsLib.OPS.paintInlineImageXObject) {
+                        imgObj = ops.argsArray[i][0];
+                    }
+                    if (!imgObj || !imgObj.width || !imgObj.height) continue;
+
+                    // 去重：有对象名的按名称（g_* 为跨页共享对象，其余名称本身含页码已唯一）；
+                    // 无名称的内联图且有像素数据时按内容采样；ImageBitmap 无数据可采样，不参与去重，
+                    // 避免同尺寸扫描页被误判为重复图片
+                    let key = null;
+                    if (objName) {
+                        key = `n:${objName}`;
+                    } else if (imgObj.data) {
+                        key = sampleKey(imgObj);
+                    }
+                    if (key) {
+                        if (docSeen.has(key)) continue;
+                        docSeen.add(key);
+                    }
+
+                    if (skipTiny && imgObj.width < TINY_LIMIT && imgObj.height < TINY_LIMIT) continue;
+
+                    try {
+                        const canvas = pdfImageToCanvas(imgObj);
+                        const { blob, ext } = await exportCanvas(canvas);
+                        indexInPage++;
+                        images.push(makeImageEntry(
+                            `${base}_p${p}_${indexInPage}.${ext}`,
+                            blob, imgObj.width, imgObj.height, `第 ${p} 页`, true
+                        ));
+                    } catch (err) {
+                        console.warn('图片转换失败，已跳过:', objName, err);
+                    }
+                }
+                page.cleanup();
+            }
+            return images;
+        }
+
+        // 从 page.objs / pdf.commonObjs 中解析图片对象（带超时保护，大图解码较慢）
+        function resolvePdfObject(page, pdf, name) {
+            const store = name.startsWith('g_') ? pdf.commonObjs : page.objs;
+            return new Promise((resolve) => {
+                const timer = setTimeout(() => resolve(null), 15000);
+                try {
+                    store.get(name, (obj) => {
+                        clearTimeout(timer);
+                        resolve(obj);
+                    });
+                } catch (err) {
+                    clearTimeout(timer);
+                    resolve(null);
+                }
+            });
+        }
+
+        // pdf.js 图片对象 → canvas（兼容 bitmap 与各种像素格式）
+        function pdfImageToCanvas(img) {
+            const canvas = document.createElement('canvas');
+            canvas.width = img.width;
+            canvas.height = img.height;
+            const ctx = canvas.getContext('2d');
+
+            // 新版 pdf.js 直接给 ImageBitmap
+            if (img.bitmap) {
+                ctx.drawImage(img.bitmap, 0, 0);
+                return canvas;
+            }
+
+            const src = img.data;
+            if (!src) throw new Error('无像素数据');
+            const imageData = ctx.createImageData(img.width, img.height);
+            const dst = imageData.data;
+            const pixels = img.width * img.height;
+
+            // ImageKind: 1 = GRAYSCALE_1BPP, 2 = RGB_24BPP, 3 = RGBA_32BPP
+            if (img.kind === 3 || src.length === pixels * 4) {
+                dst.set(src.subarray(0, pixels * 4));
+            } else if (img.kind === 2 || src.length === pixels * 3) {
+                for (let i = 0, j = 0; i < pixels; i++) {
+                    dst[i * 4] = src[j++];
+                    dst[i * 4 + 1] = src[j++];
+                    dst[i * 4 + 2] = src[j++];
+                    dst[i * 4 + 3] = 255;
+                }
+            } else if (img.kind === 1) {
+                // 1 bit 灰度，按行对齐到字节
+                const rowBytes = Math.ceil(img.width / 8);
+                for (let y = 0; y < img.height; y++) {
+                    for (let x = 0; x < img.width; x++) {
+                        const bit = (src[y * rowBytes + (x >> 3)] >> (7 - (x & 7))) & 1;
+                        const v = bit ? 255 : 0;
+                        const o = (y * img.width + x) * 4;
+                        dst[o] = dst[o + 1] = dst[o + 2] = v;
+                        dst[o + 3] = 255;
+                    }
+                }
+            } else {
+                throw new Error('未知的像素格式 kind=' + img.kind);
+            }
+            ctx.putImageData(imageData, 0, 0);
+            return canvas;
+        }
+
+        // ---------- PDF：整页渲染为图片 ----------
+        async function extractPdfPages(file) {
+            if (!window.pdfjsLib) throw new Error('PDF.js 未加载（请检查网络后刷新页面）');
+            const data = await file.arrayBuffer();
+            const pdf = await pdfjsLib.getDocument({ data }).promise;
+            const base = stripExt(file.name);
+            const images = [];
+
+            for (let p = 1; p <= pdf.numPages; p++) {
+                progressText.textContent = `${file.name} - 渲染第 ${p}/${pdf.numPages} 页`;
+                const page = await pdf.getPage(p);
+                const viewport = page.getViewport({ scale: 2 }); // 2x 保证清晰度
+                const canvas = document.createElement('canvas');
+                canvas.width = Math.floor(viewport.width);
+                canvas.height = Math.floor(viewport.height);
+                const ctx = canvas.getContext('2d');
+                // 先铺白底，避免透明背景导出后发黑
+                ctx.fillStyle = '#ffffff';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+                await page.render({ canvasContext: ctx, viewport }).promise;
+                const { blob, ext } = await exportCanvas(canvas);
+                images.push(makeImageEntry(
+                    `${base}_page${String(p).padStart(3, '0')}.${ext}`,
+                    blob, canvas.width, canvas.height, `第 ${p} 页`, true
+                ));
+                page.cleanup();
+            }
+            return images;
+        }
+
+        // ---------- PPTX / DOCX：解压 media 目录 ----------
+        async function extractOoxmlMedia(file) {
+            if (typeof JSZip === 'undefined') throw new Error('JSZip 未加载');
+            const zip = await JSZip.loadAsync(file);
+            const base = stripExt(file.name);
+            const skipTiny = skipTinyCheckbox.checked;
+
+            // pptx 图片在 ppt/media/，docx 在 word/media/
+            const mediaFiles = Object.keys(zip.files)
+                .filter(path => /^(ppt|word)\/media\//i.test(path) && !zip.files[path].dir)
+                .sort(naturalCompare);
+
+            if (mediaFiles.length === 0) return [];
+
+            const mimeMap = {
+                png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg',
+                gif: 'image/gif', bmp: 'image/bmp', webp: 'image/webp',
+                svg: 'image/svg+xml', tif: 'image/tiff', tiff: 'image/tiff',
+                emf: 'image/emf', wmf: 'image/wmf'
+            };
+            const images = [];
+
+            for (let i = 0; i < mediaFiles.length; i++) {
+                const path = mediaFiles[i];
+                const ext = path.split('.').pop().toLowerCase();
+                if (!(ext in mimeMap)) continue; // 跳过内嵌音视频等非图片资源
+                progressText.textContent = `${file.name} - 媒体 ${i + 1}/${mediaFiles.length}`;
+
+                const bytes = await zip.files[path].async('uint8array');
+                const blob = new Blob([bytes], { type: mimeMap[ext] });
+                const shortName = path.split('/').pop();
+
+                // 尝试解码获取尺寸；EMF/WMF/TIFF 浏览器无法解码，仅提供下载
+                let width = 0, height = 0, previewable = false;
+                try {
+                    const bmp = await createImageBitmap(blob);
+                    width = bmp.width;
+                    height = bmp.height;
+                    previewable = true;
+                    bmp.close();
+                } catch (e) {
+                    previewable = ext === 'svg'; // svg 交给 <img> 直接渲染
+                }
+
+                if (skipTiny && previewable && width > 0 && width < TINY_LIMIT && height < TINY_LIMIT) continue;
+
+                images.push(makeImageEntry(
+                    `${base}_${shortName}`,
+                    blob, width, height, shortName, previewable
+                ));
+            }
+            return images;
+        }
+
+        // ---------- 通用工具 ----------
+        function makeImageEntry(name, blob, width, height, origin, previewable) {
+            return {
+                id: Math.random().toString(36).substr(2, 9),
+                name, blob,
+                url: URL.createObjectURL(blob),
+                width, height, origin, previewable
+            };
+        }
+
+        function stripExt(name) {
+            const dot = name.lastIndexOf('.');
+            return dot > 0 ? name.slice(0, dot) : name;
+        }
+
+        function canvasToBlob(canvas, type, quality) {
+            return new Promise((resolve, reject) => {
+                canvas.toBlob(b => b ? resolve(b) : reject(new Error('canvas 导出失败')), type || 'image/png', quality);
+            });
+        }
+
+        // 智能导出：大尺寸且完全不透明的图片用 JPEG（扫描版 PDF 转 PNG 体积会暴涨），
+        // 小图或含透明像素的图片仍用 PNG 保真
+        const JPEG_PIXEL_THRESHOLD = 1500000; // 约 1.5 MP
+        async function exportCanvas(canvas) {
+            const w = canvas.width, h = canvas.height;
+            const useJpeg = w * h > JPEG_PIXEL_THRESHOLD && !canvasHasAlpha(canvas);
+            if (useJpeg) {
+                return { blob: await canvasToBlob(canvas, 'image/jpeg', 0.92), ext: 'jpg' };
+            }
+            return { blob: await canvasToBlob(canvas), ext: 'png' };
+        }
+
+        // 稀疏采样 alpha 通道判断是否含透明像素（逐行取样，避免大图整体 getImageData 撑爆内存）
+        function canvasHasAlpha(canvas) {
+            const ctx = canvas.getContext('2d');
+            const w = canvas.width, h = canvas.height;
+            const rowStep = Math.max(1, Math.floor(h / 64));   // 最多采样 64 行
+            const colStep = Math.max(1, Math.floor(w / 256));  // 每行最多采样 256 个像素
+            for (let y = 0; y < h; y += rowStep) {
+                const row = ctx.getImageData(0, y, w, 1).data;
+                for (let i = 3; i < row.length; i += 4 * colStep) {
+                    if (row[i] < 255) return true;
+                }
+            }
+            return false;
+        }
+
+        // 尺寸 + 数据长度 + 首尾字节采样，用于识别重复图片
+        function sampleKey(img) {
+            const d = img.data || (img.bitmap ? null : []);
+            let sample = 0;
+            if (d && d.length) {
+                const step = Math.max(1, Math.floor(d.length / 16));
+                for (let i = 0; i < d.length; i += step) sample = (sample * 31 + d[i]) >>> 0;
+            }
+            return `s:${img.width}x${img.height}:${d ? d.length : 'bmp'}:${sample}`;
+        }
+
+        // image1, image2, image10 的自然排序
+        function naturalCompare(a, b) {
+            return a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' });
+        }
+
+        function formatSize(bytes) {
+            if (bytes < 1024) return bytes + ' B';
+            if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+            return (bytes / 1024 / 1024).toFixed(2) + ' MB';
+        }
+
+        // ---------- 渲染 ----------
+        function renderResults() {
+            resultsSection.innerHTML = '';
+
+            const total = state.docs.reduce((n, d) => n + d.images.length, 0);
+            totalCountEl.textContent = `共 ${total} 张图片`;
+            fileCountEl.textContent = `来自 ${state.docs.length} 个文档`;
+
+            state.docs.forEach(doc => {
+                const groupContainer = document.createElement('div');
+                groupContainer.className = 'bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden fade-in';
+
+                // Group Header (clickable to collapse/expand)
+                const header = document.createElement('div');
+                header.className = 'bg-slate-50 px-6 py-4 border-b border-slate-100 flex justify-between items-center cursor-pointer select-none hover:bg-slate-100 transition-colors';
+                header.addEventListener('click', (ev) => {
+                    if (ev.target.closest('.download-btn')) return;
+                    groupContainer.classList.toggle('group-collapsed');
+                });
+                const typeIcon = doc.type === 'PDF' ? 'fa-file-pdf text-rose-500'
+                    : doc.type === 'PPTX' ? 'fa-file-powerpoint text-orange-500'
+                    : 'fa-file-word text-blue-500';
+                header.innerHTML = `
+                    <div class="flex items-center gap-2 min-w-0">
+                        <i class="fa-solid fa-chevron-down chevron text-slate-400"></i>
+                        <i class="fa-solid ${typeIcon}"></i>
+                        <h3 class="font-bold text-slate-700 text-lg truncate">${doc.fileName}</h3>
+                        <span class="bg-rose-100 text-rose-800 text-xs font-medium px-2.5 py-0.5 rounded-full whitespace-nowrap">${doc.images.length} 张</span>
+                    </div>
+                    <button class="download-btn text-slate-400 hover:text-rose-600 transition-colors text-sm whitespace-nowrap" onclick="downloadDoc('${doc.id}', this)">
+                        <i class="fa-solid fa-download mr-1"></i> 打包本文档
+                    </button>
+                `;
+                groupContainer.appendChild(header);
+
+                // Collapsible body wrapper
+                const body = document.createElement('div');
+                body.className = 'group-body';
+                body.style.maxHeight = '50000px';
+
+                if (doc.images.length === 0) {
+                    body.innerHTML = '<p class="p-6 text-sm text-slate-400">该文档中没有提取到图片</p>';
+                } else {
+                    const grid = document.createElement('div');
+                    grid.className = 'grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4 p-6';
+
+                    doc.images.forEach(img => {
+                        const card = document.createElement('div');
+                        card.className = 'img-card relative group aspect-square checker-bg rounded-lg overflow-hidden border border-slate-200';
+                        const preview = img.previewable
+                            ? `<img src="${img.url}" alt="${img.name}" loading="lazy" decoding="async" class="w-full h-full object-contain">`
+                            : `<div class="w-full h-full flex flex-col items-center justify-center bg-slate-100 text-slate-400">
+                                   <i class="fa-solid fa-file-image text-4xl mb-2"></i>
+                                   <span class="text-xs">无法预览 (${img.name.split('.').pop().toUpperCase()})</span>
+                               </div>`;
+                        const sizeLabel = img.width > 0 ? `${img.width}×${img.height} · ` : '';
+                        card.innerHTML = `
+                            ${preview}
+                            <div class="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-30 transition-all duration-300 flex items-center justify-center gap-2 opacity-0 group-hover:opacity-100">
+                                ${img.previewable ? `
+                                <button class="bg-white text-slate-800 w-9 h-9 rounded-full text-sm shadow-lg transform translate-y-4 group-hover:translate-y-0 transition-transform duration-300" title="查看大图" onclick="viewImage('${doc.id}','${img.id}')">
+                                    <i class="fa-solid fa-magnifying-glass-plus"></i>
+                                </button>` : ''}
+                                <button class="bg-rose-600 text-white w-9 h-9 rounded-full text-sm shadow-lg transform translate-y-4 group-hover:translate-y-0 transition-transform duration-300" title="下载" onclick="downloadImage('${doc.id}','${img.id}')">
+                                    <i class="fa-solid fa-download"></i>
+                                </button>
+                            </div>
+                            <div class="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/70 to-transparent p-2 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
+                                <p class="text-white text-xs truncate">${img.origin}</p>
+                                <p class="text-white/70 text-[10px] truncate">${sizeLabel}${formatSize(img.blob.size)}</p>
+                            </div>
+                        `;
+                        grid.appendChild(card);
+                    });
+                    body.appendChild(grid);
+                }
+
+                groupContainer.appendChild(body);
+                resultsSection.appendChild(groupContainer);
+            });
+        }
+
+        // ---------- 下载 ----------
+        function findImage(docId, imgId) {
+            const doc = state.docs.find(d => d.id === docId);
+            return doc ? doc.images.find(i => i.id === imgId) : null;
+        }
+
+        window.viewImage = (docId, imgId) => {
+            const img = findImage(docId, imgId);
+            if (img) {
+                const win = window.open();
+                win.document.write(`<body style="margin:0;background:#111;display:flex;align-items:center;justify-content:center;min-height:100vh"><img src="${img.url}" style="max-width:100%"></body>`);
+            }
+        };
+
+        window.downloadImage = (docId, imgId) => {
+            const img = findImage(docId, imgId);
+            if (!img) return;
+            const link = document.createElement('a');
+            link.href = img.url;
+            link.download = img.name;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        };
+
+        // Package images into a ZIP and trigger a browser download
+        async function zipAndDownload(images, zipName, triggerBtn) {
+            if (!images || images.length === 0) {
+                alert('没有可下载的图片');
+                return;
+            }
+            if (typeof JSZip === 'undefined') {
+                alert('压缩组件 (JSZip) 未加载，无法打包下载');
+                return;
+            }
+
+            let originalHtml = '';
+            if (triggerBtn) {
+                originalHtml = triggerBtn.innerHTML;
+                triggerBtn.disabled = true;
+                triggerBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-1"></i> 打包中...';
+            }
+
+            try {
+                const zip = new JSZip();
+                const usedNames = {};
+                images.forEach(img => {
+                    let name = img.name;
+                    // 避免压缩包内重名
+                    if (usedNames[name] !== undefined) {
+                        const count = ++usedNames[name];
+                        const dot = name.lastIndexOf('.');
+                        name = dot > 0
+                            ? `${name.slice(0, dot)}_${count}${name.slice(dot)}`
+                            : `${name}_${count}`;
+                    } else {
+                        usedNames[name] = 0;
+                    }
+                    zip.file(name, img.blob);
+                });
+
+                const blob = await zip.generateAsync({
+                    type: 'blob',
+                    // 图片本身已压缩，STORE 避免二次 DEFLATE 卡顿
+                    compression: 'STORE',
+                    streamFiles: true
+                }, (metadata) => {
+                    if (triggerBtn) {
+                        triggerBtn.innerHTML = `<i class="fa-solid fa-spinner fa-spin mr-1"></i> 打包中 ${Math.round(metadata.percent)}%`;
+                    }
+                });
+
+                const link = document.createElement('a');
+                link.href = URL.createObjectURL(blob);
+                link.download = `${zipName}.zip`;
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+                URL.revokeObjectURL(link.href);
+            } catch (err) {
+                console.error('打包下载失败:', err);
+                alert('打包下载失败：' + err.message);
+            } finally {
+                if (triggerBtn) {
+                    triggerBtn.disabled = false;
+                    triggerBtn.innerHTML = originalHtml;
+                }
+            }
+        }
+
+        window.downloadDoc = (docId, btn) => {
+            const doc = state.docs.find(d => d.id === docId);
+            if (doc) zipAndDownload(doc.images, `图片_${stripExt(doc.fileName)}`, btn);
+        };
+
+        window.downloadAll = () => {
+            const all = state.docs.flatMap(d => d.images);
+            // ZIP 名默认取上传文件名；多个文档时以第一个命名并标注数量
+            const first = stripExt(state.docs[0] ? state.docs[0].fileName : '文档');
+            const zipName = state.docs.length > 1
+                ? `图片_${first}_等${state.docs.length}个文档`
+                : `图片_${first}`;
+            zipAndDownload(all, zipName, downloadAllBtn);
+        };
+
+    </script>
+</body>
+</html>
